@@ -87,18 +87,28 @@ export const lawsAll = () => q("SELECT id FROM laws").all().map(r => lawFull(r.i
 /* ---------- sérialisation ---------- */
 function participation(id) { return q("SELECT COUNT(*) c FROM votes WHERE proposal_id=?").get(id).c; }
 
+/** Votes pour supprimer définitivement un contenu masqué. */
+export function deletionState(viewer, type, id) {
+  const votes = q("SELECT COUNT(*) c FROM deletion_votes WHERE target_type=? AND target_id=?").get(type, String(id)).c;
+  const mine = !!viewer && !!q("SELECT 1 x FROM deletion_votes WHERE target_type=? AND target_id=? AND user_id=?").get(type, String(id), viewer.id);
+  return { votes, threshold: cstNow().params.modDelVotes, mine };
+}
+
 export function proposalDetail(id, viewer) {
   const p = getProposal(id);
-  if (!p || (p.hidden && !isMod(viewer))) return null;
+  if (!p) return null;
+  const vid = viewer?.id ?? -1;
+  // Masquée : le public ne voit ni le texte ni le titre, mais peut voter pour sa suppression définitive.
+  if (p.hidden && !isMod(viewer)) return { id: p.id, kind: p.kind, masked: true, isAuthor: p.authorId === vid, deletion: deletionState(viewer, "proposal", p.id) };
   const el = electorate();
   const versions = versionsOf(p.id);
-  const vid = viewer?.id ?? -1;
   const notes = q(`SELECT n.*, u.pseudo, u.minor AS uminor,
                      (SELECT 1 FROM flags f WHERE f.target_type='note' AND f.target_id=n.id AND f.user_id=?) AS mine,
                      (SELECT COUNT(*) FROM flags f WHERE f.target_type='note' AND f.target_id=n.id AND f.case_id IS NULL) AS pending,
                      (SELECT id FROM cases c WHERE c.target_type='note' AND c.target_id=n.id AND c.status='open') AS open_case
                    FROM notes n JOIN users u ON u.id=n.author_id WHERE n.proposal_id=? ORDER BY n.date`).all(vid, p.id).map(n => {
-    const base = { id: n.id, type: n.type, author: n.pseudo, minor: !!n.uminor, date: n.date, para: n.para, status: n.status, reports: n.pending, underReview: !!n.open_case, mine: n.author_id === vid, myReport: !!n.mine };
+    const base = { id: n.id, type: n.type, author: n.pseudo, minor: !!n.uminor, date: n.date, para: n.para, status: n.status, reports: n.pending, underReview: !!n.open_case, mine: n.author_id === vid, myReport: !!n.mine,
+      deletion: n.hidden ? deletionState(viewer, "note", n.id) : null };
     if (n.hidden === 2) return { ...base, removed: true };
     if (n.hidden === 1 && !(isMod(viewer) || n.author_id === vid)) return { ...base, masked: true };
     return { ...base, masked: n.hidden === 1, text: n.text, base: n.base, proposed: n.proposed };

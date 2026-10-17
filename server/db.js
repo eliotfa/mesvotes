@@ -208,6 +208,16 @@ const MIGRATIONS = [
     read INTEGER NOT NULL DEFAULT 0
   );
   CREATE INDEX notifications_user ON notifications(user_id, read);
+  `,
+  // v3 : suppression définitive d'un contenu masqué, décidée par un vote de la communauté
+  `
+  CREATE TABLE deletion_votes(
+    target_type TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    date INTEGER NOT NULL,
+    PRIMARY KEY(target_type, target_id, user_id)
+  );
   `
 ];
 

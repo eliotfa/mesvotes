@@ -5,7 +5,7 @@ import { config } from "./config.js";
 import { fail } from "./http.js";
 import { revokeSessions } from "./auth.js";
 import { sendMail } from "./mail.js";
-import { now, uid, cstNow, journal, isAdmin, lastVersion } from "./model.js";
+import { now, uid, cstNow, journal, isAdmin, lastVersion, deletionState } from "./model.js";
 import { MOD_ACTIONS, actionsFor, REPORT_REASONS } from "../public/shared/constitution.js";
 
 const HOUR = 3600e3, DAY = 864e5, APPEAL_DAYS = 7;
@@ -191,6 +191,7 @@ function applyDecision(c, decision) {
   const sev = SEV[decision], at = now();
   if (c.target_type === "note") q("UPDATE notes SET hidden=? WHERE id=?").run(sev >= 1 ? 2 : 0, c.target_id);
   if (c.target_type === "proposal") q("UPDATE proposals SET hidden=?, under_review=0 WHERE id=?").run(sev >= 1 ? 1 : 0, c.target_id);
+  if (sev === 0) clearDeletionVotes(c.target_type, c.target_id);
   const kind = { warn: "warn", suspend7: "suspend", suspend30: "suspend", ban: "ban" }[decision];
   if (kind) {
     const until = decision === "suspend7" ? at + 7 * DAY : decision === "suspend30" ? at + 30 * DAY : null;
@@ -231,6 +232,62 @@ export function urgentRemove(admin, type, id) {
   notify(info.authorId, `L'administration a retiré une de tes ${TYPE[type]}s pour contenu manifestement illégal.`, null, true);
 }
 
+/* ---------- suppression par vote (contenu masqué) ---------- */
+// Masquer peut se faire seul (intervention d'urgence, réversible). Supprimer définitivement, jamais :
+// il faut qu'assez d'inscrits votent pour cela, et seulement sur un contenu déjà masqué.
+const DELETABLE = ["note", "proposal"];
+const underExamen = (type, id) => !!q("SELECT 1 x FROM cases WHERE target_type=? AND target_id=? AND status='open'").get(type, id);
+
+export function voteDeletion(user, type, rawId, on) {
+  if (!DELETABLE.includes(type)) fail(400, "Type de contenu inconnu.");
+  const id = String(rawId);
+  return tx(() => {
+    const t = type === "note"
+      ? q("SELECT author_id, hidden FROM notes WHERE id=?").get(id)
+      : q("SELECT author_id, hidden, law_id FROM proposals WHERE id=?").get(id);
+    if (!t) fail(404, "Élément introuvable.");
+    if (!(t.hidden > 0)) fail(409, "Ce contenu n'est pas masqué : seul un contenu masqué peut être supprimé par un vote.");
+    if (t.author_id === user.id) fail(400, "Tu ne peux pas voter sur ton propre contenu.");
+    if (t.law_id) fail(409, "Une proposition adoptée fait partie du recueil des lois : elle ne peut pas être supprimée.");
+    if (underExamen(type, id)) fail(409, "Ce contenu est en cours d'examen par un jury.");
+    if (on) q("INSERT OR IGNORE INTO deletion_votes(target_type,target_id,user_id,date) VALUES (?,?,?,?)").run(type, id, user.id, now());
+    else q("DELETE FROM deletion_votes WHERE target_type=? AND target_id=? AND user_id=?").run(type, id, user.id);
+    const state = deletionState(user, type, id);
+    if (on && state.votes >= state.threshold) { purge(type, id, state.votes); return { deleted: true }; }
+    return { deleted: false, ...state };
+  });
+}
+
+function purge(type, id, votes) {
+  const info = targetInfo(type, id);
+  if (type === "note") q("DELETE FROM notes WHERE id=?").run(id);
+  else {
+    q("UPDATE proposals SET fork_of=NULL WHERE fork_of=?").run(id);
+    q("DELETE FROM proposals WHERE id=?").run(id);
+  }
+  clearDeletionVotes(type, id);
+  journal(`Contenu supprimé définitivement par un vote de ${votes} inscrits : ${info.label}`);
+  notify(info.authorId, `Ta ${TYPE[type]} a été supprimée définitivement par un vote de ${votes} inscrits.`, null, true);
+}
+
+/** Les votes ne valent que pour un contenu masqué : on les efface dès qu'il est rétabli. */
+export function clearDeletionVotes(type, id) {
+  q("DELETE FROM deletion_votes WHERE target_type=? AND target_id=?").run(type, String(id));
+}
+
+/** Contenus masqués, hors examen en cours, en attente d'un vote de suppression. Sans texte ni auteur. */
+function maskedList(viewer) {
+  const notes = q(`SELECT n.id, n.author_id, n.date, n.hidden, p.title FROM notes n JOIN proposals p ON p.id=n.proposal_id
+    WHERE n.hidden>0 ORDER BY n.date DESC LIMIT 50`).all()
+    .filter(n => !underExamen("note", n.id))
+    .map(n => ({ type: "note", id: n.id, label: `contribution sur « ${n.title.slice(0, 60)} »`, date: n.date, removed: n.hidden === 2, author: n.author_id }));
+  const proposals = q("SELECT id, author_id, created_at date FROM proposals WHERE hidden=1 AND law_id IS NULL ORDER BY created_at DESC LIMIT 50").all()
+    .filter(p => !underExamen("proposal", p.id))
+    .map(p => ({ type: "proposal", id: p.id, label: "proposition masquée", date: p.date, author: p.author_id }));
+  return [...notes, ...proposals].sort((a, b) => b.date - a.date).slice(0, 50)
+    .map(({ author, ...x }) => ({ ...x, own: viewer?.id === author, ...deletionState(viewer, x.type, x.id) }));
+}
+
 /* ---------- lecture ---------- */
 const publicCase = c => ({
   id: c.id, short: short(c.id), targetType: c.target_type, round: c.round, appealOf: c.appeal_of, status: c.status,
@@ -243,7 +300,7 @@ const publicCase = c => ({
 export function moderationOverview(viewer) {
   const closed = q("SELECT * FROM cases WHERE status='closed' ORDER BY closed_at DESC LIMIT 50").all().map(publicCase);
   const openCount = q("SELECT COUNT(*) c FROM cases WHERE status='open'").get().c;
-  const out = { closed, openCount, rules: cstNow().params };
+  const out = { closed, openCount, rules: cstNow().params, masked: maskedList(viewer) };
   if (viewer) {
     out.duties = q(`SELECT c.* FROM case_jurors j JOIN cases c ON c.id=j.case_id WHERE j.user_id=? AND c.status='open' ORDER BY c.deadline`).all(viewer.id)
       .map(c => ({ ...publicCase(c), myVote: q("SELECT vote FROM case_jurors WHERE case_id=? AND user_id=?").get(c.id, viewer.id).vote }));

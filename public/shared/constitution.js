@@ -17,7 +17,8 @@ export const PARAMS = [
   { k: "constQuorumPct", l: "Révision : participation minimum", u: "% des inscrits", min: 0, max: 100 },
   { k: "modReports", l: "Modération : signalements pour ouvrir une affaire", u: "signalements", min: 1, max: 100 },
   { k: "modJury", l: "Modération : jurés tirés au sort", u: "jurés", min: 3, max: 51 },
-  { k: "modHours", l: "Modération : délai pour juger", u: "heures", min: 6, max: 720 }
+  { k: "modHours", l: "Modération : délai pour juger", u: "heures", min: 6, max: 720 },
+  { k: "modDelVotes", l: "Modération : votes pour supprimer un contenu masqué", u: "votes", min: 3, max: 100 }
 ];
 export const PMETA = Object.fromEntries(PARAMS.map(p => [p.k, p]));
 export const FREE_KEYS = [["preambule", "Préambule"], ["principes", "Article 1 · Principes"], ["charte", "Article 9 · Charte du débat"]];
@@ -47,7 +48,7 @@ export const normalizeCst = c => c && ({ ...c, params: { ...DEFAULT_PARAMS, ...(
 export const DEFAULT_PARAMS = {
   projetMin: 15, projetMax: 90, parrainagePct: 1, parrainageMin: 50, parrainageDays: 60,
   delibMin: 90, delibMax: 180, voteDays: 7, majorityPct: 50, quorumPct: 5, constMajorityPct: 60, constQuorumPct: 10,
-  modReports: 3, modJury: 7, modHours: 72
+  modReports: 3, modJury: 7, modHours: 72, modDelVotes: 5
 };
 export const DEFAULT_FREE = {
   preambule: "Nous, citoyennes et citoyens, voulons voter pour des idées et non pour des personnes. La présente Constitution fixe les règles par lesquelles nous proposons, débattons et adoptons nos lois. Elle peut elle-même être révisée par tous.",
@@ -71,7 +72,7 @@ export function constArticles(c) {
     { key: "evolution", title: "Article 7 · Modification et abrogation", body: "Toute loi adoptée peut être modifiée ou abrogée par une nouvelle proposition, selon la même procédure. Toute proposition peut être reprise par n'importe qui sous forme de variante. L'historique complet de chaque texte reste public." },
     { key: "revision", title: "Article 8 · Révision de la Constitution", body: `Toute disposition de la présente Constitution peut être révisée selon la même procédure. Une révision est adoptée si les voix « pour » représentent plus de ${n_(p.constMajorityPct)} % des suffrages exprimés, et si au moins ${n_(p.constQuorumPct)} % des inscrits ont participé. Une proposition suit les règles en vigueur au jour de son dépôt.` },
     { key: "charte", title: "Article 9 · Charte du débat", body: f.charte },
-    { key: "moderation", title: "Article 10 · Modération citoyenne", body: `Tout inscrit peut signaler une proposition, une contribution ou un compte. Dès ${p.modReports} signalement${p.modReports > 1 ? "s" : ""}, une affaire est ouverte et confiée à un jury de ${p.modJury} inscrits tirés au sort, hors l'auteur et les auteurs des signalements. Pendant l'examen, une contribution signalée est masquée. Le jury dispose de ${p.modHours} heures. Chaque juré choisit une mesure, de « ne rien faire » à « exclure définitivement » ; la mesure retenue est la médiane des votes. Si moins de la moitié des jurés a voté, le doute profite à l'auteur. L'auteur peut faire appel une fois devant un jury de ${p.modJury * 2 + 1} inscrits. Chaque décision est inscrite au journal public. En cas de contenu manifestement illégal, l'équipe d'administration peut le retirer immédiatement ; cette intervention est aussi inscrite au journal.` }
+    { key: "moderation", title: "Article 10 · Modération citoyenne", body: `Tout inscrit peut signaler une proposition, une contribution ou un compte. Dès ${p.modReports} signalement${p.modReports > 1 ? "s" : ""}, une affaire est ouverte et confiée à un jury de ${p.modJury} inscrits tirés au sort, hors l'auteur et les auteurs des signalements. Pendant l'examen, une contribution signalée est masquée. Le jury dispose de ${p.modHours} heures. Chaque juré choisit une mesure, de « ne rien faire » à « exclure définitivement » ; la mesure retenue est la médiane des votes. Si moins de la moitié des jurés a voté, le doute profite à l'auteur. L'auteur peut faire appel une fois devant un jury de ${p.modJury * 2 + 1} inscrits. Chaque décision est inscrite au journal public. Un contenu masqué ne disparaît définitivement que si ${p.modDelVotes} inscrits votent pour sa suppression, son auteur exclu. En cas de contenu manifestement illégal, l'équipe d'administration peut le retirer immédiatement ; cette intervention est aussi inscrite au journal.` }
   ];
 }
 
