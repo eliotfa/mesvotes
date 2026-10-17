@@ -1,0 +1,17 @@
+{
+  "name": "mesvotes",
+  "version": "1.0.0",
+  "description": "mesvotes.fr — plateforme de démocratie directe : proposer, amender, parrainer, débattre et voter des lois, avec une Constitution révisable par vote.",
+  "type": "module",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env server/index.js",
+    "dev": "DEMO_MODE=true SEED_DEMO=true node --disable-warning=ExperimentalWarning --env-file-if-exists=.env --watch server/index.js",
+    "seed": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env server/seed.js",
+    "test": "NODE_ENV=test node --disable-warning=ExperimentalWarning --test test/*.test.js"
+  }
+}

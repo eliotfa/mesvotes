@@ -1,0 +1,43 @@
+# mesvotes en production : l'application + Caddy (HTTPS automatique avec Let's Encrypt).
+# Les valeurs viennent du fichier .env (voir .env.example).
+
+services:
+  app:
+    build: .
+    image: mesvotes:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+      TRUST_PROXY: "true"
+    volumes:
+      - ./data:/data
+    expose:
+      - "3000"
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?Renseigne DOMAIN dans .env}
+      ACME_EMAIL: ${ACME_EMAIL:-contact@mesvotes.fr}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+volumes:
+  caddy_data:
+  caddy_config:

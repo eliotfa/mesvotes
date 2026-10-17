@@ -1,0 +1,22 @@
+# Caddy obtient et renouvelle seul le certificat HTTPS pour $DOMAIN.
+# Pour servir aussi www.mesvotes.fr (redirigé vers mesvotes.fr), décommente le bloc du bas
+# après avoir créé l'enregistrement DNS « www ».
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+	request_body {
+		max_size 12MB
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+	reverse_proxy app:3000
+}
+
+# www.{$DOMAIN} {
+# 	redir https://{$DOMAIN}{uri} permanent
+# }
