@@ -8,7 +8,7 @@ import {
   hashPassword, verifyPassword, burnTime, createSession, destroySession, currentUser, revokeSessions,
   createToken, consumeToken
 } from "./auth.js";
-import { sendMail } from "./mail.js";
+import { sendMail, maskEmail } from "./mail.js";
 import {
   now, uid, isMod, isAdmin, journal, cstNow, cstAll, electorate, getProposal, proposalDetail, proposalSummaries,
   lawFull, lawsAll, lastVersion, versionsOf
@@ -138,7 +138,10 @@ route("POST", "/api/auth/forgot", async (req) => {
   const u = q("SELECT * FROM users WHERE email=?").get(String(b.email || "").trim().toLowerCase());
   if (u && !u.banned) {
     const t = createToken(u.id, "reset", 2);
+    // L'échec d'envoi est déjà journalisé par sendMail ; la réponse reste identique pour ne pas révéler les comptes.
     sendMail({ to: u.email, subject: "Nouveau mot de passe mesvotes", text: `Bonjour ${u.pseudo},\n\nPour choisir un nouveau mot de passe, ouvre ce lien (valable 2 heures) :\n${config.baseUrl}/#/reinitialiser?t=${t}\n\nSi tu n'as rien demandé, ignore ce message.\n\nmesvotes.fr` }).catch(() => {});
+  } else {
+    console.log(`[mail] mot de passe oublié sans envoi pour ${maskEmail(String(b.email || "").trim())} : ${u ? "compte banni" : "aucun compte à cette adresse"}`);
   }
   return { ok: true };
 });
