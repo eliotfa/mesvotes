@@ -303,3 +303,20 @@ test("compte : changement de mot de passe et suppression", async () => {
   assert.equal(ok(await z.get("/api/bootstrap")).me, null);
   assert.equal((await client().post("/api/auth/login", { email: "zoe@test.fr", password: "nouveau123" })).status, 401);
 });
+
+test("compte : changer de mot de passe déconnecte les autres appareils, pas celui qui le change", async () => {
+  resetRateLimits();
+  const phone = client(), laptop = client();
+  ok(await phone.post("/api/auth/register", { email: "ida@test.fr", pseudo: "ida", password: "motdepasse1", consent: true }));
+  ok(await laptop.post("/api/auth/login", { email: "ida@test.fr", password: "motdepasse1" }));
+  ok(await phone.patch("/api/me", { currentPassword: "motdepasse1", newPassword: "nouveau456" }));
+  assert.equal(ok(await phone.get("/api/bootstrap")).me?.pseudo, "ida");
+  assert.equal(ok(await laptop.get("/api/bootstrap")).me, null);
+});
+
+test("fichiers joints : un contenu qui ne correspond pas à l'extension est refusé", async () => {
+  resetRateLimits();
+  const r = await ana.call("POST", "/api/uploads", undefined, { raw: Buffer.from("MZ\x90\x00 programme"), headers: { "x-file-name": encodeURIComponent("rapport.pdf") } });
+  assert.equal(r.status, 400);
+  assert.match(r.data.error, /ne correspond pas/);
+});
