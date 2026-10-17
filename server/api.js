@@ -15,6 +15,7 @@ import {
 } from "./model.js";
 import { settle, forceAdvance } from "./lifecycle.js";
 import { flag, castVote, appeal, moderationOverview, caseDetail, urgentRemove } from "./moderation.js";
+import { challenge, verify as verifyAntibot } from "./antibot.js";
 import { moderate } from "../public/shared/moderation.js";
 import { sanitizeCst, validateCst, constDiffs, relativeToBase, mergedCst } from "../public/shared/constitution.js";
 import { paras, normText, parseTags, normQ, THEMES, KINDS, PHASE_INDEX } from "../public/shared/util.js";
@@ -72,9 +73,12 @@ route("GET", "/api/bootstrap", (req) => {
   };
 });
 
+route("GET", "/api/antibot", () => challenge());
+
 route("POST", "/api/auth/register", async (req, res) => {
   rateLimit("reg:" + clientIp(req, config.trustProxy), 5, 3600e3, "Trop d'inscriptions depuis cette connexion. Réessaie plus tard.");
   const b = await readJson(req);
+  verifyAntibot(b);
   const email = str(b.email, 3, 200, "L'e-mail").toLowerCase();
   if (!EMAIL_RE.test(email)) fail(400, "Cette adresse e-mail n'est pas valide.");
   const pseudo = str(b.pseudo, 3, 20, "Le pseudo");
@@ -99,6 +103,7 @@ route("POST", "/api/auth/login", async (req, res) => {
   const b = await readJson(req);
   const email = String(b.email || "").trim().toLowerCase();
   rateLimit("login:" + clientIp(req, config.trustProxy), 20, 900e3);
+  verifyAntibot(b, { minMs: 0 }); // pas de délai : les gestionnaires de mots de passe remplissent vite
   rateLimit("login:" + email, 8, 900e3);
   const u = q("SELECT * FROM users WHERE email=?").get(email);
   if (!u) { burnTime(b.password); fail(401, "E-mail ou mot de passe incorrect."); }
@@ -129,6 +134,7 @@ route("POST", "/api/auth/forgot", async (req) => {
   if (!config.mailEnabled) fail(400, "La réinitialisation par e-mail n'est pas encore activée. Contacte un administrateur.");
   rateLimit("forgot:" + clientIp(req, config.trustProxy), 5, 3600e3);
   const b = await readJson(req);
+  verifyAntibot(b);
   const u = q("SELECT * FROM users WHERE email=?").get(String(b.email || "").trim().toLowerCase());
   if (u && !u.banned) {
     const t = createToken(u.id, "reset", 2);

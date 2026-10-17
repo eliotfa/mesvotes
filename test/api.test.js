@@ -4,12 +4,15 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import crypto from "node:crypto";
 
 process.env.NODE_ENV = "test";
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "mesvotes-test-"));
 process.env.INIT_PARRAINAGE_MIN = "2";
 process.env.DEMO_MODE = "true";
 process.env.BASE_URL = "http://localhost";
+process.env.ANTIBOT_MIN_SECONDS = "0";
+process.env.ANTIBOT_BITS = "12";
 
 const { createServer, boot } = await import("../server/index.js");
 const { clock } = await import("../server/model.js");
@@ -28,9 +31,14 @@ before(async () => {
 });
 after(() => { server.close(); fs.rmSync(process.env.DATA_DIR, { recursive: true, force: true }); });
 
+async function solve() {
+  const c = await (await fetch(base + "/api/antibot")).json();
+  for (let n = 0; ; n++) { const h = crypto.createHash("sha256").update(c.salt + n).digest(); if ((h.readUInt32BE(0) >>> (32 - c.bits)) === 0) return { ...c, nonce: String(n) }; }
+}
 function client() {
   let cookie = "";
-  const call = async (method, url, body, { csrf = true, raw, headers = {} } = {}) => {
+  const call = async (method, url, body, { csrf = true, raw, headers = {}, antibot = true } = {}) => {
+    if (antibot && body && /\/api\/auth\/(register|login|forgot)$/.test(url) && !body.antibot) body = { ...body, antibot: await solve() };
     const h = { ...headers }; if (cookie) h.cookie = cookie; if (csrf) h["x-mesvotes"] = "1";
     let payload;
     if (raw) payload = raw; else if (body !== undefined) { payload = JSON.stringify(body); h["content-type"] = "application/json"; }
@@ -60,6 +68,17 @@ test("inscriptions : le premier compte est administrateur", async () => {
   assert.equal((await client().post("/api/auth/register", { email: "y@test.fr", pseudo: "sansaccord", password: "motdepasse1" })).status, 400, "consentement obligatoire");
   assert.equal((await client().post("/api/auth/login", { email: "ana@test.fr", password: "mauvais" })).status, 401);
   assert.equal(ok(await admin.get("/api/bootstrap")).electorate, 4);
+});
+
+test("anti-robot : défi obligatoire, usage unique, champ piège", async () => {
+  resetRateLimits();
+  const c = client();
+  assert.equal((await c.post("/api/auth/register", { email: "bot@test.fr", pseudo: "robot1", password: "motdepasse1", consent: true }, { antibot: false })).status, 400);
+  const proof = await solve();
+  assert.equal((await c.post("/api/auth/register", { email: "bot2@test.fr", pseudo: "robot2", password: "motdepasse1", consent: true, antibot: { ...proof, nonce: "999999999999" } }, { antibot: false })).status, 400, "mauvaise preuve");
+  assert.equal((await c.post("/api/auth/register", { email: "bot3@test.fr", pseudo: "robot3", password: "motdepasse1", consent: true, website: "http://spam.example" })).status, 400, "champ piège rempli");
+  ok(await c.post("/api/auth/login", { email: "ana@test.fr", password: "motdepasse1", antibot: proof }, { antibot: false }));
+  assert.equal((await c.post("/api/auth/login", { email: "ana@test.fr", password: "motdepasse1", antibot: proof }, { antibot: false })).status, 400, "une preuve ne sert qu'une fois");
 });
 
 test("protection CSRF : une écriture sans en-tête est refusée", async () => {

@@ -3,6 +3,7 @@ import { esc, paras, parseTags, THEMES, PHASES, KINDS, DAY } from "../shared/uti
 import { diffView } from "../shared/diff.js";
 import { PARAMS, PMETA, FREE_KEYS, constArticles, constDiffs, paramChanges, n_, fmtParam, sanitizeCst, validateCst, MOD_ACTIONS, actionsFor, REPORT_REASONS } from "../shared/constitution.js";
 import { moderate } from "../shared/moderation.js";
+import { solveAntibot } from "./pow.js";
 
 const PH = Object.fromEntries(PHASES.map((p, i) => [p.id, { ...p, i }]));
 const $ = s => document.querySelector(s);
@@ -582,12 +583,21 @@ async function viewFork(id) {
 }
 
 /* ---------- comptes ---------- */
+// Le défi anti-robot se résout en arrière-plan pendant que la personne remplit le formulaire.
+const startAntibot = () => { UI.pow = solveAntibot(); UI.pow.catch(() => {}); };
+async function takeAntibot(box) {
+  if (!UI.pow) startAntibot();
+  const slow = setTimeout(() => { if (box) box.innerHTML = `<div class="notice">Vérification anti-robot…</div>`; }, 400);
+  try { return await UI.pow; } finally { clearTimeout(slow); if (box) box.innerHTML = ""; startAntibot(); }
+}
 function viewLogin() {
   VIEW = { name: "login", data: null };
+  startAntibot();
   return `<div class="auth-wrap"><div class="page-head" style="text-align:left"><h1>Se connecter</h1></div>
   <div class="section"><form class="stack" data-form="login">
     <label class="f">E-mail<input type="email" id="l-email" required autocomplete="email"></label>
     <label class="f">Mot de passe<input type="password" id="l-pass" required autocomplete="current-password"></label>
+    <div class="hp" aria-hidden="true"><label>Site web (laisser vide)<input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
     <div class="form-msg"></div>
     <button class="btn primary" type="submit">Se connecter</button>
     <p class="muted" style="margin:0;font-size:14px">Pas encore de compte ? <a href="#/inscription">S'inscrire</a>${BOOT.mailEnabled ? ` · <a href="#/reinitialiser">Mot de passe oublié</a>` : ""}</p>
@@ -595,11 +605,13 @@ function viewLogin() {
 }
 function viewRegister() {
   VIEW = { name: "register", data: null };
+  startAntibot();
   return `<div class="auth-wrap"><div class="page-head"><h1>Rejoindre</h1><p>Un e-mail, un pseudo et un mot de passe. Ton pseudo est public, ton e-mail ne l'est jamais.</p></div>
   <div class="section"><form class="stack" data-form="register">
     <label class="f">E-mail<input type="email" id="r-email" required autocomplete="email" placeholder="prenom@exemple.fr"></label>
     <label class="f">Pseudo <small>3 à 20 caractères : lettres sans accent, chiffres, point, tiret, tiret bas.</small><input type="text" id="r-pseudo" required minlength="3" maxlength="20" pattern="[A-Za-z0-9._\\-]{3,20}" autocomplete="nickname"></label>
     <label class="f">Mot de passe <small>8 caractères minimum.</small><input type="password" id="r-pass" required minlength="8" autocomplete="new-password"></label>
+    <div class="hp" aria-hidden="true"><label>Site web (laisser vide)<input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
     <div class="f">Tu as…<div class="seg"><label><input type="radio" name="age" value="maj" checked> 18 ans ou plus</label><label><input type="radio" name="age" value="min"> Moins de 18 ans</label></div><small>Tout le monde vote. Ça sert seulement à afficher aussi les résultats par âge. Si tu as moins de 15 ans, inscris-toi avec l'accord d'un de tes parents.</small></div>
     <label class="consent"><input type="checkbox" id="r-consent" required><span>J'accepte la <a href="#/constitution" target="_blank">Constitution</a> et sa charte du débat. Je consens à ce que mes propositions, parrainages et votes, qui peuvent révéler mes opinions politiques, soient traités pour faire fonctionner mesvotes (<a href="#/mentions-legales" target="_blank">confidentialité</a>). Je peux retirer ce consentement en supprimant mon compte.</span></label>
     <div class="form-msg"></div>
@@ -609,9 +621,10 @@ function viewRegister() {
 function viewReset(params) {
   VIEW = { name: "reset", data: null };
   const t = params.get("t");
+  if (!t) startAntibot();
   return `<div class="auth-wrap"><div class="page-head"><h1>Mot de passe</h1></div><div class="section">
   ${t ? `<form class="stack" data-form="reset" data-t="${esc(t)}"><label class="f">Nouveau mot de passe<input type="password" id="np" required minlength="8" autocomplete="new-password"></label><div class="form-msg"></div><button class="btn primary" type="submit">Enregistrer</button></form>`
-      : `<form class="stack" data-form="forgot"><label class="f">Ton e-mail<input type="email" id="fe" required autocomplete="email"></label><div class="form-msg"></div><button class="btn primary" type="submit">Recevoir un lien</button></form>`}
+      : `<form class="stack" data-form="forgot"><label class="f">Ton e-mail<input type="email" id="fe" required autocomplete="email"></label><div class="hp" aria-hidden="true"><label>Site web (laisser vide)<input type="text" name="website" tabindex="-1" autocomplete="off"></label></div><div class="form-msg"></div><button class="btn primary" type="submit">Recevoir un lien</button></form>`}
   </div></div>`;
 }
 async function viewAccount(params) {
@@ -1002,17 +1015,19 @@ document.addEventListener("submit", async e => {
   if (btn) btn.disabled = true;
   try {
     if (kind === "login") {
-      await api("POST", "/api/auth/login", { email: $("#l-email").value, password: $("#l-pass").value });
+      const antibot = await takeAntibot(box);
+      await api("POST", "/api/auth/login", { email: $("#l-email").value, password: $("#l-pass").value, website: f.website.value, antibot });
       await loadBoot(); toast(`Bonjour @${me().pseudo} !`);
       const back = UI.after && !/connexion|inscription/.test(UI.after) ? UI.after : "#/"; UI.after = "#/"; go(back);
     }
     else if (kind === "register") {
-      await api("POST", "/api/auth/register", { email: $("#r-email").value, pseudo: $("#r-pseudo").value, password: $("#r-pass").value, minor: f.querySelector("input[name=age]:checked").value === "min", consent: $("#r-consent").checked });
+      const antibot = await takeAntibot(box);
+      await api("POST", "/api/auth/register", { website: f.website.value, antibot, email: $("#r-email").value, pseudo: $("#r-pseudo").value, password: $("#r-pass").value, minor: f.querySelector("input[name=age]:checked").value === "min", consent: $("#r-consent").checked });
       await loadBoot();
       toast(BOOT.mailEnabled ? "Compte créé. Confirme ton adresse avec le lien reçu par e-mail." : `Bienvenue @${me().pseudo} !`);
       const back = UI.after && !/connexion|inscription/.test(UI.after) ? UI.after : "#/"; UI.after = "#/"; go(back);
     }
-    else if (kind === "forgot") { await api("POST", "/api/auth/forgot", { email: $("#fe").value }); box.innerHTML = `<div class="notice ok">Si un compte existe avec cet e-mail, un lien vient d'être envoyé.</div>`; }
+    else if (kind === "forgot") { const antibot = await takeAntibot(box); await api("POST", "/api/auth/forgot", { email: $("#fe").value, website: f.website.value, antibot }); box.innerHTML = `<div class="notice ok">Si un compte existe avec cet e-mail, un lien vient d'être envoyé.</div>`; }
     else if (kind === "reset") { await api("POST", "/api/auth/reset", { token: f.dataset.t, password: $("#np").value }); await loadBoot(); toast("Mot de passe enregistré."); go("#/"); }
     else if (kind === "password") { await api("PATCH", "/api/me", { currentPassword: $("#cp").value, newPassword: $("#cn").value }); f.reset(); toast("Mot de passe modifié."); }
     else if (kind === "delete") { await api("DELETE", "/api/me", { password: $("#dp").value }); await loadBoot(); toast("Compte supprimé."); go("#/"); }

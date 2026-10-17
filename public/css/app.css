@@ -380,3 +380,5 @@ blockquote.quote{margin:0;padding:10px 14px;border-left:3px solid var(--accent);
 .legal p{margin:0 0 10px;max-width:70ch}
 .consent{display:flex;gap:10px;align-items:flex-start;font-size:13px;line-height:1.5;padding:10px 12px;background:var(--sunk);border-radius:var(--r)}
 .consent input{accent-color:var(--accent);margin-top:3px;flex:none;width:16px;height:16px}
+/* Champ piège anti-robot : invisible pour les humains et les lecteurs d'écran */
+.hp{position:absolute!important;left:-10000px!important;top:auto;width:1px;height:1px;overflow:hidden}

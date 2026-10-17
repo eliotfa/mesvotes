@@ -217,6 +217,7 @@ mesvotes/
 │   ├── model.js            Accès aux données et mise en forme
 │   ├── db.js               SQLite (node:sqlite) et migrations
 │   ├── auth.js             Mots de passe (scrypt), sessions, jetons
+│   ├── antibot.js          Preuve de travail, délai minimum, champ piège
 │   ├── mail.js             Client SMTP minimal
 │   ├── seed.js             Données d'exemple
 │   └── config.js           Variables d'environnement
@@ -261,6 +262,8 @@ Toute requête d'écriture doit porter l'en-tête `x-mesvotes: 1` (protection CS
 ---
 
 ## Sécurité et limites connues
+
+**Anti-robot, sans service extérieur ni case à cocher :** l'inscription, la connexion et le mot de passe oublié demandent une preuve de travail (le navigateur calcule en arrière-plan, environ 0,2 seconde, ce qui coûte cher à un robot qui crée des milliers de comptes), un délai minimum de 2 secondes à l'inscription et un champ piège invisible. Réglages : `ANTIBOT_BITS` et `ANTIBOT_MIN_SECONDS` dans `.env`. Aucun cookie ni traceur tiers.
 
 **En place :** mots de passe hachés avec scrypt, sessions en cookie `HttpOnly` / `SameSite=Lax` / `Secure`, protection CSRF, en-têtes de sécurité stricts (CSP, HSTS, anti-iframe), limitation des tentatives (inscription, connexion, publication), fichiers joints servis en mode isolé, validation et modération côté serveur, conteneur sans droits root, pare-feu.
 
