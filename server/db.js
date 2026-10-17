@@ -142,6 +142,72 @@ const MIGRATIONS = [
     size INTEGER NOT NULL,
     date INTEGER NOT NULL
   );
+  `,
+  // v2 : modération citoyenne (signalements, affaires, jurys, sanctions, notifications)
+  `
+  ALTER TABLE users ADD COLUMN suspended_until INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE proposals ADD COLUMN under_review INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE flags(
+    id INTEGER PRIMARY KEY,
+    target_type TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    reason TEXT NOT NULL,
+    comment TEXT,
+    date INTEGER NOT NULL,
+    case_id TEXT,
+    UNIQUE(target_type, target_id, user_id)
+  );
+  CREATE INDEX flags_target ON flags(target_type, target_id, case_id);
+  INSERT INTO flags(target_type,target_id,user_id,reason,comment,date,case_id)
+    SELECT 'note', note_id, user_id, 'autre', NULL, date, NULL FROM reports;
+  CREATE TABLE cases(
+    id TEXT PRIMARY KEY,
+    target_type TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    target_user INTEGER REFERENCES users(id),
+    round INTEGER NOT NULL DEFAULT 1,
+    appeal_of TEXT,
+    status TEXT NOT NULL DEFAULT 'open',
+    snapshot TEXT NOT NULL,
+    opened_at INTEGER NOT NULL,
+    deadline INTEGER NOT NULL,
+    extended INTEGER NOT NULL DEFAULT 0,
+    jury_size INTEGER NOT NULL,
+    closed_at INTEGER,
+    decision TEXT,
+    tally TEXT,
+    note TEXT,
+    appealed INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX cases_status ON cases(status);
+  CREATE TABLE case_jurors(
+    case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    drawn_at INTEGER NOT NULL,
+    vote TEXT,
+    comment TEXT,
+    voted_at INTEGER,
+    PRIMARY KEY(case_id, user_id)
+  );
+  CREATE TABLE sanctions(
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    case_id TEXT,
+    kind TEXT NOT NULL,
+    until INTEGER,
+    date INTEGER NOT NULL,
+    revoked INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE TABLE notifications(
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    date INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    link TEXT,
+    read INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX notifications_user ON notifications(user_id, read);
   `
 ];
 

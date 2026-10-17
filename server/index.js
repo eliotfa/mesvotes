@@ -9,6 +9,7 @@ import { HttpError, sendJson } from "./http.js";
 import { handleApi, serveUpload } from "./api.js";
 import { ensureConstitution } from "./model.js";
 import { tick } from "./lifecycle.js";
+import { tickModeration } from "./moderation.js";
 import { purgeExpired } from "./auth.js";
 import { seedIfEmpty } from "./seed.js";
 
@@ -66,6 +67,7 @@ export function boot() {
   ensureConstitution();
   if (config.seedDemo) seedIfEmpty();
   tick();
+  tickModeration();
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
@@ -77,7 +79,11 @@ if (isMain) {
     console.log(`  e-mails : ${config.mailEnabled ? "SMTP " + config.smtp.host : "désactivés (liens affichés dans ces journaux)"} · mode démo : ${config.demoMode ? "oui" : "non"}`);
   });
   const timer = setInterval(() => {
-    try { const n = tick(); if (n) console.log(`[horloge] ${n} proposition(s) ont changé de phase`); purgeExpired(); }
+    try {
+      const n = tick(); if (n) console.log(`[horloge] ${n} proposition(s) ont changé de phase`);
+      const m = tickModeration(); if (m) console.log(`[horloge] ${m} affaire(s) de modération traitée(s)`);
+      purgeExpired();
+    }
     catch (e) { console.error("[horloge]", e); }
   }, config.tickSeconds * 1000);
   const stop = () => { clearInterval(timer); server.close(() => { db.close(); process.exit(0); }); setTimeout(() => process.exit(0), 5000).unref(); };

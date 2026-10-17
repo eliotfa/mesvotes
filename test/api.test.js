@@ -14,6 +14,7 @@ process.env.BASE_URL = "http://localhost";
 const { createServer, boot } = await import("../server/index.js");
 const { clock } = await import("../server/model.js");
 const { tick } = await import("../server/lifecycle.js");
+const { tickModeration } = await import("../server/moderation.js");
 const { resetRateLimits } = await import("../server/http.js");
 
 const DAY = 864e5;
@@ -162,22 +163,83 @@ test("sans assez de parrains, la proposition est archivée", async () => {
   assert.equal(d.result.outcome, "expired");
 });
 
-test("trois signalements masquent une contribution, la modération tranche", async () => {
-  const r = ok(await ana.post("/api/proposals", { kind: "loi", title: "Sujet de débat animé", summary: "Une proposition pour tester les signalements.", text: "Texte de test pour la modération.", projetDays: 30, delibDays: 180 }));
-  const n = ok(await bob.post(`/api/proposals/${r.id}/notes`, { type: "comment", text: "Une remarque désagréable mais polie." }));
-  for (const c of [ana, cleo, admin]) ok(await c.post(`/api/notes/${n.id}/report`));
-  let note = ok(await cleo.get(`/api/proposals/${r.id}`)).notes[0];
-  assert.equal(note.masked, true);
-  assert.equal(note.text, undefined);
-  assert.equal(ok(await bob.get(`/api/proposals/${r.id}`)).notes[0].text, "Une remarque désagréable mais polie.");
-  assert.equal((await cleo.get("/api/mod/queue")).status, 403);
-  const q = ok(await admin.get("/api/mod/queue"));
-  assert.equal(q.notes.length, 1);
-  ok(await admin.post(`/api/mod/notes/${n.id}`, { action: "restore" }));
-  note = ok(await cleo.get(`/api/proposals/${r.id}`)).notes[0];
-  assert.equal(note.masked, false);
-  const j = ok(await cleo.get("/api/journal")).items;
-  assert.ok(j.some(x => /rétablie/.test(x.text)));
+const jurors = [];
+test("modération citoyenne : jury tiré au sort, mesure médiane, suspension, appel", async () => {
+  resetRateLimits();
+  for (let i = 1; i <= 8; i++) {
+    if (i === 5) resetRateLimits();
+    const c = client(); ok(await c.post("/api/auth/register", { email: `j${i}@test.fr`, pseudo: `jure${i}`, password: "motdepasse1" })); jurors.push(c);
+  }
+  const r = ok(await ana.post("/api/proposals", { kind: "loi", title: "Sujet de débat animé", summary: "Une proposition pour tester la modération.", text: "Texte de test pour la modération.", projetDays: 30, delibDays: 180 }));
+  const n = ok(await bob.post(`/api/proposals/${r.id}/notes`, { type: "comment", text: "Une remarque franchement désagréable." }));
+  assert.equal((await bob.post("/api/reports", { type: "note", id: n.id, reason: "insulte" })).status, 400, "on ne signale pas sa propre contribution");
+  ok(await ana.post("/api/reports", { type: "note", id: n.id, reason: "insulte", comment: "Attaque personnelle" }));
+  assert.equal((await ana.post("/api/reports", { type: "note", id: n.id, reason: "insulte" })).status, 409, "un seul signalement par personne");
+  ok(await cleo.post("/api/reports", { type: "note", id: n.id, reason: "harcelement" }));
+  const third = ok(await admin.post("/api/reports", { type: "note", id: n.id, reason: "insulte" }));
+  assert.ok(third.opened && third.caseId, "le 3e signalement ouvre une affaire");
+  const caseId = third.caseId;
+  // Pendant l'examen, la contribution est masquée pour les autres
+  assert.equal(ok(await cleo.get(`/api/proposals/${r.id}`)).notes[0].text, undefined);
+  assert.equal((await cleo.get(`/api/cases/${caseId}`)).status, 403, "l'affaire en cours est réservée aux jurés");
+  // 7 jurés tirés au sort parmi les 8 inscrits non concernés
+  const drawn = [];
+  for (const c of jurors) { const m = ok(await c.get("/api/moderation")); if (m.duties.length) drawn.push(c); }
+  assert.equal(drawn.length, 7);
+  const d = ok(await drawn[0].get(`/api/cases/${caseId}`));
+  assert.equal(d.snapshot.text, "Une remarque franchement désagréable.");
+  assert.equal(d.comments[0].comment, "Attaque personnelle");
+  // Votes : la médiane (4e sur 7, par ordre de sévérité) est « suspendre 7 jours »
+  const votes = ["keep", "hide", "warn", "suspend7", "suspend7", "suspend7", "ban"];
+  for (let i = 0; i < 7; i++) ok(await drawn[i].post(`/api/cases/${caseId}/vote`, { action: votes[i] }));
+  const closed = ok(await bob.get(`/api/cases/${caseId}`));
+  assert.equal(closed.status, "closed");
+  assert.equal(closed.decision, "suspend7");
+  assert.equal(closed.canAppeal, true);
+  assert.equal(ok(await cleo.get(`/api/proposals/${r.id}`)).notes[0].removed, true);
+  const bobMe = ok(await bob.get("/api/bootstrap")).me;
+  assert.ok(bobMe.suspendedUntil > 0 && bobMe.unread > 0);
+  assert.equal((await bob.post(`/api/proposals/${r.id}/notes`, { type: "comment", text: "Je peux encore écrire ?" })).status, 403, "suspendu : plus de participation");
+  // Appel : nouveau jury élargi, sans les premiers jurés ; il décide de ne rien faire
+  const ap = ok(await bob.post(`/api/cases/${caseId}/appeal`));
+  assert.equal((await bob.post(`/api/cases/${caseId}/appeal`)).status, 409, "un seul appel");
+  const second = jurors.find(c => !drawn.includes(c));
+  const m2 = ok(await second.get("/api/moderation"));
+  assert.equal(m2.duties[0].id, ap.caseId);
+  ok(await second.post(`/api/cases/${ap.caseId}/vote`, { action: "keep" }));
+  const final = ok(await bob.get(`/api/cases/${ap.caseId}`));
+  assert.equal(final.decision, "keep");
+  assert.equal(ok(await bob.get("/api/bootstrap")).me.suspendedUntil, 0, "la suspension est levée");
+  assert.equal(ok(await cleo.get(`/api/proposals/${r.id}`)).notes[0].text, "Une remarque franchement désagréable.", "la contribution est rétablie");
+  ok(await bob.post(`/api/proposals/${r.id}/notes`, { type: "comment", text: "Merci au jury d'appel." }));
+  const pub = ok(await client().get("/api/moderation"));
+  assert.equal(pub.closed.length, 2);
+  assert.equal(pub.closed[0].snapshot, undefined, "le public ne voit pas le contenu");
+  assert.ok(ok(await cleo.get("/api/journal")).items.some(x => /appel/.test(x.text)));
+});
+
+test("modération : sans quorum, le doute profite à l'auteur", async () => {
+  const r = ok(await cleo.post("/api/proposals", { kind: "loi", title: "Proposition contestée", summary: "Une proposition signalée sans jury actif.", text: "Texte de la proposition contestée.", projetDays: 30, delibDays: 180 }));
+  for (const c of [ana, bob, admin]) ok(await c.post("/api/reports", { type: "proposal", id: r.id, reason: "hors-sujet" }));
+  assert.equal(ok(await ana.get(`/api/proposals/${r.id}`)).underReview, true);
+  clock.offset += 73 * 3600e3; tickModeration();   // 1re échéance : prolongation
+  clock.offset += 73 * 3600e3; tickModeration();   // 2e échéance : clôture
+  const m = ok(await client().get("/api/moderation"));
+  const c = m.closed.find(x => x.targetType === "proposal");
+  assert.equal(c.decision, "keep");
+  assert.match(c.note, /doute profite/);
+  const d = ok(await ana.get(`/api/proposals/${r.id}`));
+  assert.equal(d.underReview, false);
+  assert.equal(d.hidden, false);
+});
+
+test("modération : signaler un compte", async () => {
+  assert.equal((await bob.post("/api/reports", { type: "user", id: "bob", reason: "harcelement" })).status, 400);
+  ok(await ana.post("/api/reports", { type: "user", id: "bob", reason: "harcelement", comment: "Messages répétés" }));
+  assert.equal((await ana.post("/api/reports", { type: "user", id: "BOB", reason: "harcelement" })).status, 409);
+  const prof = ok(await ana.get("/api/users/bob"));
+  assert.equal(prof.myFlag, true);
+  assert.equal(prof.pseudo, "bob");
 });
 
 test("filtres et recherche", async () => {
@@ -190,7 +252,7 @@ test("filtres et recherche", async () => {
   // La recherche couvre aussi le titre de la loi visée : la loi, sa modification et son abrogation.
   assert.equal(s.total, 3, JSON.stringify(s.items.map(i => i.title)));
   assert.equal(ok(await ana.get("/api/proposals?q=dimanche%20introuvablexyz")).total, 0);
-  assert.equal(ok(await ana.get("/api/proposals?author=cleo")).total, 3);
+  assert.equal(ok(await ana.get("/api/proposals?author=cleo")).total, 4);
   assert.ok(ok(await ana.get("/api/proposals?mine=1")).items.every(p => p.author.pseudo === "ana"));
 });
 

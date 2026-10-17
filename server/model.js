@@ -2,7 +2,7 @@
 import crypto from "node:crypto";
 import { q, J, S } from "./db.js";
 import { config } from "./config.js";
-import { DEFAULT_FREE, mergedCst, paramChanges } from "../public/shared/constitution.js";
+import { DEFAULT_FREE, mergedCst, paramChanges, normalizeCst } from "../public/shared/constitution.js";
 import { DAY, normQ } from "../public/shared/util.js";
 
 /** Horloge (décalable dans les tests). */
@@ -20,7 +20,7 @@ export const isAdmin = u => !!u && u.role === "admin";
 export function journal(text) { q("INSERT INTO journal(date,text) VALUES (?,?)").run(now(), text); }
 
 /* ---------- Constitution ---------- */
-const cstRow = r => r && ({ n: r.n, date: r.date, params: J(r.params), free: J(r.free), note: r.note, via: r.via });
+const cstRow = r => r && normalizeCst({ n: r.n, date: r.date, params: J(r.params), free: J(r.free), note: r.note, via: r.via });
 export function ensureConstitution() {
   if (!q("SELECT n FROM constitution LIMIT 1").get())
     q("INSERT INTO constitution(n,date,params,free,note,via) VALUES (1,?,?,?,?,NULL)").run(now(), S(config.initialParams), S(DEFAULT_FREE), "Constitution fondatrice");
@@ -55,7 +55,7 @@ export function rowToProposal(r) {
     id: r.id, kind: r.kind, title: r.title, summary: r.summary, authorId: r.author_id,
     themes: J(r.themes) || [], tags: J(r.tags) || [], is2027: !!r.is2027, phase: r.phase, dates: J(r.dates),
     projetDays: r.projet_days, delibDays: r.delib_days, rules: J(r.rules), constV: r.const_v,
-    target: r.target_law ? { lawId: r.target_law, base: r.target_base } : null, constBase: J(r.const_base),
+    target: r.target_law ? { lawId: r.target_law, base: r.target_base } : null, constBase: normalizeCst(J(r.const_base)), underReview: !!r.under_review,
     forkOf: r.fork_of, lawId: r.law_id, files: J(r.files) || [], links: J(r.links) || [], result: J(r.result),
     hidden: !!r.hidden, createdAt: r.created_at
   };
@@ -66,10 +66,10 @@ export function saveProposalState(p) {
     .run(p.phase, S(p.dates), p.result ? S(p.result) : null, p.lawId || null, S(p.themes), S(p.tags), p.id);
 }
 export const versionsOf = id => q("SELECT * FROM proposal_versions WHERE proposal_id=? ORDER BY n").all(id)
-  .map(v => ({ n: v.n, date: v.date, note: v.note, text: v.text, cst: J(v.cst) }));
+  .map(v => ({ n: v.n, date: v.date, note: v.note, text: v.text, cst: normalizeCst(J(v.cst)) }));
 export const lastVersion = id => {
   const v = q("SELECT * FROM proposal_versions WHERE proposal_id=? ORDER BY n DESC LIMIT 1").get(id);
-  return v && { n: v.n, date: v.date, note: v.note, text: v.text, cst: J(v.cst) };
+  return v && { n: v.n, date: v.date, note: v.note, text: v.text, cst: normalizeCst(J(v.cst)) };
 };
 const author = id => { const u = q("SELECT pseudo, minor FROM users WHERE id=?").get(id); return u ? { pseudo: u.pseudo, minor: !!u.minor } : { pseudo: "inconnu", minor: false }; };
 
@@ -93,15 +93,19 @@ export function proposalDetail(id, viewer) {
   const el = electorate();
   const versions = versionsOf(p.id);
   const vid = viewer?.id ?? -1;
-  const notes = q(`SELECT n.*, u.pseudo, u.minor AS uminor, (SELECT 1 FROM reports r WHERE r.note_id=n.id AND r.user_id=?) AS mine
+  const notes = q(`SELECT n.*, u.pseudo, u.minor AS uminor,
+                     (SELECT 1 FROM flags f WHERE f.target_type='note' AND f.target_id=n.id AND f.user_id=?) AS mine,
+                     (SELECT COUNT(*) FROM flags f WHERE f.target_type='note' AND f.target_id=n.id AND f.case_id IS NULL) AS pending,
+                     (SELECT id FROM cases c WHERE c.target_type='note' AND c.target_id=n.id AND c.status='open') AS open_case
                    FROM notes n JOIN users u ON u.id=n.author_id WHERE n.proposal_id=? ORDER BY n.date`).all(vid, p.id).map(n => {
-    const base = { id: n.id, type: n.type, author: n.pseudo, minor: !!n.uminor, date: n.date, para: n.para, status: n.status, reports: n.reports, mine: n.author_id === vid, myReport: !!n.mine };
+    const base = { id: n.id, type: n.type, author: n.pseudo, minor: !!n.uminor, date: n.date, para: n.para, status: n.status, reports: n.pending, underReview: !!n.open_case, mine: n.author_id === vid, myReport: !!n.mine };
     if (n.hidden === 2) return { ...base, removed: true };
     if (n.hidden === 1 && !(isMod(viewer) || n.author_id === vid)) return { ...base, masked: true };
     return { ...base, masked: n.hidden === 1, text: n.text, base: n.base, proposed: n.proposed };
   });
   const out = {
     ...p, authorId: undefined, author: author(p.authorId), isAuthor: p.authorId === vid,
+    myFlag: !!q("SELECT 1 x FROM flags WHERE target_type='proposal' AND target_id=? AND user_id=?").get(p.id, vid),
     versions, notes,
     parrains: q("SELECT COUNT(*) c FROM parrainages WHERE proposal_id=?").get(p.id).c,
     myParrain: !!q("SELECT 1 x FROM parrainages WHERE proposal_id=? AND user_id=?").get(p.id, vid),
@@ -139,7 +143,8 @@ export function proposalSummaries(viewer) {
       participation: nVotes[p.id] || 0, targetTitle: lawTitle, forkOf: p.forkOf,
       result: p.result ? { outcome: p.result.outcome, pourPct: p.result.pourPct } : null
     };
-    if (p.kind === "const" && p.constBase && lv.cst) s.constChanges = paramChanges(p.constBase, J(lv.cst));
+    if (p.kind === "const" && p.constBase && lv.cst) s.constChanges = paramChanges(p.constBase, normalizeCst(J(lv.cst)));
+    s.underReview = p.underReview;
     s._search = normQ([p.title, p.summary, lv.text || "", a.pseudo, ...p.tags, ...p.themes, lawTitle].join(" "));
     s._authorId = p.authorId;
     return s;

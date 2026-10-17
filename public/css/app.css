@@ -346,3 +346,16 @@ footer.site .wrap{display:flex;gap:8px 18px;flex-wrap:wrap;justify-content:space
 .mini a.minilink{display:grid;gap:4px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--paper);color:inherit;text-decoration:none}
 .mini a.minilink:hover{border-color:var(--muted)}
 .mini a.minilink .meta{gap:6px}
+/* ---------- Modération citoyenne ---------- */
+.badge{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;border-radius:99px;background:var(--accent);color:var(--accent-ink);font-family:var(--f-mono);font-size:11px;font-weight:500;line-height:1;vertical-align:1px}
+.ulink{color:inherit;text-decoration:none;font-weight:600}
+.ulink:hover{text-decoration:underline}
+.reasons{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.optrow{display:flex;gap:10px;align-items:flex-start;padding:9px 12px;border:1px solid var(--line);border-radius:var(--r);cursor:pointer;font-size:14px;background:var(--surface)}
+.optrow:hover{border-color:var(--muted)}
+.optrow:has(input:checked){border-color:var(--accent);background:color-mix(in srgb,var(--accent) 7%,var(--surface))}
+.optrow input{accent-color:var(--accent);margin-top:3px;flex:none}
+.optrow small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+blockquote.quote{margin:0;padding:10px 14px;border-left:3px solid var(--accent);background:var(--paper);white-space:pre-wrap;overflow-wrap:anywhere}
+.journal li.unread span:last-child{font-weight:600}
+@media (max-width:640px){.reasons{grid-template-columns:1fr}}

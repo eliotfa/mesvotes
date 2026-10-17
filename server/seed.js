@@ -39,8 +39,14 @@ function seed() {
       .run(id, o.kind || "loi", o.title, o.summary, users[o.author], S(o.themes), S(o.tags), o.is2027 ? 1 : 0, o.phase, S(o.dates), o.projetDays || 30, o.delibDays || 90,
         S(cst.params), cst.n, o.target?.lawId ?? null, o.target?.base ?? null, o.constBase ? S(o.constBase) : null, o.lawId || null, S(o.links || []), o.result ? S(o.result) : null, o.dates.projet);
     o.versions.forEach(([d, note, text, c], i) => q("INSERT INTO proposal_versions(proposal_id,n,date,note,text,cst) VALUES (?,?,?,?,?,?)").run(id, i + 1, d, note, text, c ? S(c) : null));
-    (o.notes || []).forEach(n => q("INSERT INTO notes(id,proposal_id,type,author_id,date,text,para,base,proposed,status,reports) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
-      .run(uid(12), id, n.type, users[n.author], ago(n.days), n.text, n.para ?? null, n.base ?? null, n.proposed ?? null, n.status ?? null, n.reports || 0));
+    (o.notes || []).forEach(n => {
+      const nid = uid(12);
+      q("INSERT INTO notes(id,proposal_id,type,author_id,date,text,para,base,proposed,status) VALUES (?,?,?,?,?,?,?,?,?,?)")
+        .run(nid, id, n.type, users[n.author], ago(n.days), n.text, n.para ?? null, n.base ?? null, n.proposed ?? null, n.status ?? null);
+      // Signalements d'exemple, sous le seuil d'ouverture d'une affaire.
+      for (let i = 0; i < (n.reports || 0); i++)
+        q("INSERT INTO flags(target_type,target_id,user_id,reason,comment,date,case_id) VALUES ('note',?,?,'insulte',NULL,?,NULL)").run(nid, crowd[60 + i].id, ago(n.days - 1));
+    });
     (o.parrains ? crowd.slice(0, o.parrains) : []).forEach(c => q("INSERT INTO parrainages(proposal_id,user_id,date) VALUES (?,?,?)").run(id, c.id, ago(1)));
     (o.votes || []).forEach((choice, i) => q("INSERT INTO votes(proposal_id,user_id,choice,minor,date) VALUES (?,?,?,?,?)").run(id, crowd[i].id, choice, crowd[i].minor ? 1 : 0, ago(1)));
     return id;

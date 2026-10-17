@@ -14,6 +14,7 @@ import {
   lawFull, lawsAll, lastVersion, versionsOf
 } from "./model.js";
 import { settle, forceAdvance } from "./lifecycle.js";
+import { flag, castVote, appeal, moderationOverview, caseDetail, urgentRemove } from "./moderation.js";
 import { moderate } from "../public/shared/moderation.js";
 import { sanitizeCst, validateCst, constDiffs, relativeToBase, mergedCst } from "../public/shared/constitution.js";
 import { paras, normText, parseTags, normQ, THEMES, KINDS, PHASE_INDEX } from "../public/shared/util.js";
@@ -29,12 +30,18 @@ function checkContent(...texts) {
   const r = moderate(texts.join("\n"));
   if (r) { journal(`Contribution retenue par le filtre automatique · motif : ${r.kind}`); fail(422, r.msg, { moderation: r }); }
 }
-const meView = u => u && { id: u.id, pseudo: u.pseudo, email: u.email, minor: !!u.minor, role: u.role, emailVerified: !!u.email_verified };
+const meView = u => u && {
+  id: u.id, pseudo: u.pseudo, email: u.email, minor: !!u.minor, role: u.role, emailVerified: !!u.email_verified,
+  suspendedUntil: u.suspended_until > now() ? u.suspended_until : 0,
+  duties: q("SELECT COUNT(*) c FROM case_jurors j JOIN cases c ON c.id=j.case_id WHERE j.user_id=? AND c.status='open' AND j.vote IS NULL").get(u.id).c,
+  unread: q("SELECT COUNT(*) c FROM notifications WHERE user_id=? AND read=0").get(u.id).c
+};
 
 function requireUser(req) { const u = currentUser(req); if (!u) fail(401, "Connecte-toi pour continuer."); return u; }
 function requireActive(req) {
   const u = requireUser(req);
   if (config.mailEnabled && !u.email_verified) fail(403, "Confirme d'abord ton adresse e-mail : clique sur le lien reçu (ou renvoie-le depuis « Mon compte »).");
+  if (u.suspended_until > now()) fail(403, `Ton compte est suspendu jusqu'au ${new Date(u.suspended_until).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Paris" })} par décision d'un jury citoyen. Tu peux toujours lire et faire appel.`);
   return u;
 }
 function requireMod(req) { const u = requireUser(req); if (!isMod(u)) fail(403, "Réservé à la modération."); return u; }
@@ -316,20 +323,37 @@ route("POST", "/api/notes/:id/decision", async (req, res, { params }) => {
   return { ok: true };
 });
 
-route("POST", "/api/notes/:id/report", (req, res, { params }) => {
-  const u = requireActive(req);
-  rateLimit("report:" + u.id, 30, 3600e3);
-  const n = q("SELECT n.*, p.title FROM notes n JOIN proposals p ON p.id=n.proposal_id WHERE n.id=?").get(params.id);
-  if (!n) fail(404, "Contribution introuvable.");
-  if (n.author_id === u.id) fail(400, "Tu ne peux pas signaler ta propre contribution.");
-  const r = q("INSERT OR IGNORE INTO reports(note_id,user_id,date) VALUES (?,?,?)").run(n.id, u.id, now());
-  if (r.changes) {
-    const reports = n.reports + 1;
-    const hide = reports >= 3 && !n.reviewed && n.hidden === 0;
-    q("UPDATE notes SET reports=?, hidden=CASE WHEN ? THEN 1 ELSE hidden END WHERE id=?").run(reports, hide ? 1 : 0, n.id);
-    if (hide) journal(`Contribution masquée après ${reports} signalements sur « ${n.title.slice(0, 50)} » · en attente de relecture`);
-  }
-  return { ok: true };
+/* ---------- modération citoyenne ---------- */
+route("POST", "/api/reports", async (req) => {
+  const u = requireActive(req), b = await readJson(req);
+  rateLimit("report:" + u.id, 20, 3600e3, "Tu as fait beaucoup de signalements en peu de temps. Réessaie plus tard.");
+  return flag(u, String(b.type || ""), String(b.id || ""), String(b.reason || ""), b.comment);
+});
+route("GET", "/api/moderation", (req) => moderationOverview(currentUser(req)));
+route("GET", "/api/cases/:id", (req, res, { params }) => caseDetail(currentUser(req), params.id));
+route("POST", "/api/cases/:id/vote", async (req, res, { params }) => {
+  const u = requireActive(req), b = await readJson(req);
+  return castVote(u, params.id, String(b.action || ""), b.comment);
+});
+route("POST", "/api/cases/:id/appeal", (req, res, { params }) => appeal(requireUser(req), params.id));
+route("GET", "/api/notifications", (req) => {
+  const u = requireUser(req);
+  return { items: q("SELECT id,date,text,link,read FROM notifications WHERE user_id=? ORDER BY id DESC LIMIT 50").all(u.id).map(n => ({ ...n, read: !!n.read })) };
+});
+route("POST", "/api/notifications/read", (req) => { const u = requireUser(req); q("UPDATE notifications SET read=1 WHERE user_id=?").run(u.id); return { ok: true }; });
+route("GET", "/api/users/:pseudo", (req, res, { params }) => {
+  const viewer = currentUser(req);
+  const u = q("SELECT * FROM users WHERE pseudo_lc=?").get(decodeURIComponent(params.pseudo).toLowerCase());
+  if (!u) fail(404, "Ce compte n'existe pas.");
+  const closed = !u.pass_hash || !!u.banned;
+  return {
+    pseudo: u.pseudo, minor: !!u.minor, memberSince: u.created_at, closed, fictional: !u.pass_hash && u.email.endsWith(".invalid"),
+    suspended: u.suspended_until > now(), isMe: viewer?.id === u.id,
+    myFlag: !!(viewer && q("SELECT 1 x FROM flags WHERE target_type='user' AND target_id=? AND user_id=?").get(String(u.id), viewer.id)),
+    notesCount: q("SELECT COUNT(*) c FROM notes WHERE author_id=? AND hidden<2").get(u.id).c,
+    proposals: q("SELECT id,title,kind,phase,created_at createdAt FROM proposals WHERE author_id=? AND hidden=0 ORDER BY created_at DESC LIMIT 50").all(u.id),
+    warnings: q("SELECT COUNT(*) c FROM sanctions WHERE user_id=? AND revoked=0").get(u.id).c
+  };
 });
 
 route("POST", "/api/proposals/:id/parrainage", async (req, res, { params }) => {
@@ -408,19 +432,9 @@ export function serveUpload(req, res, id) {
 }
 
 /* ---------- modération et administration ---------- */
-route("GET", "/api/mod/queue", (req) => {
-  requireMod(req);
-  const notes = q(`SELECT n.id, n.type, n.text, n.proposed, n.date, n.reports, n.hidden, u.pseudo, p.id pid, p.title FROM notes n
-     JOIN users u ON u.id=n.author_id JOIN proposals p ON p.id=n.proposal_id
-     WHERE n.reviewed=0 AND n.hidden<2 AND n.reports>0 ORDER BY n.hidden DESC, n.reports DESC LIMIT 100`).all();
-  const hiddenProposals = q("SELECT id,title FROM proposals WHERE hidden=1").all();
-  return { notes, hiddenProposals };
-});
-route("POST", "/api/mod/notes/:id", async (req, res, { params }) => {
-  requireMod(req); const b = await readJson(req);
-  const n = q("SELECT n.*, p.title FROM notes n JOIN proposals p ON p.id=n.proposal_id WHERE n.id=?").get(params.id); if (!n) fail(404, "Contribution introuvable.");
-  if (b.action === "remove") { q("UPDATE notes SET hidden=2, reviewed=1 WHERE id=?").run(n.id); journal(`Contribution retirée après relecture sur « ${n.title.slice(0, 50)} »`); }
-  else { q("UPDATE notes SET hidden=0, reviewed=1 WHERE id=?").run(n.id); journal(`Contribution rétablie après relecture sur « ${n.title.slice(0, 50)} » (critique légitime)`); }
+route("POST", "/api/mod/urgent", async (req) => {
+  const u = requireMod(req), b = await readJson(req);
+  urgentRemove(u, String(b.type || ""), String(b.id || ""));
   return { ok: true };
 });
 route("POST", "/api/mod/proposals/:id", async (req, res, { params }) => {
@@ -428,13 +442,13 @@ route("POST", "/api/mod/proposals/:id", async (req, res, { params }) => {
   const p = getProposal(params.id); if (!p) fail(404, "Proposition introuvable.");
   const hide = b.action === "hide";
   q("UPDATE proposals SET hidden=? WHERE id=?").run(hide ? 1 : 0, p.id);
-  journal(hide ? `Proposition « ${p.title.slice(0, 50)} » masquée par la modération` : `Proposition « ${p.title.slice(0, 50)} » rétablie par la modération`);
+  journal(hide ? `Intervention d'urgence de l'administration : proposition « ${p.title.slice(0, 50)} » masquée` : `Proposition « ${p.title.slice(0, 50)} » rétablie par l'administration`);
   return { ok: true };
 });
 route("GET", "/api/admin/users", (req, res, { url }) => {
   requireAdmin(req);
   const s = "%" + (url.searchParams.get("q") || "").trim().toLowerCase() + "%";
-  return { items: q("SELECT id,email,pseudo,minor,role,email_verified emailVerified,banned,created_at createdAt FROM users WHERE pass_hash IS NOT NULL AND (email LIKE ? OR pseudo_lc LIKE ?) ORDER BY id DESC LIMIT 100").all(s, s) };
+  return { items: q("SELECT id,email,pseudo,minor,role,email_verified emailVerified,banned,suspended_until suspendedUntil,created_at createdAt FROM users WHERE pass_hash IS NOT NULL AND (email LIKE ? OR pseudo_lc LIKE ?) ORDER BY id DESC LIMIT 100").all(s, s) };
 });
 route("POST", "/api/admin/users/:id", async (req, res, { params }) => {
   const me = requireAdmin(req), b = await readJson(req);
@@ -443,8 +457,8 @@ route("POST", "/api/admin/users/:id", async (req, res, { params }) => {
   if (b.role && ["user", "moderator", "admin"].includes(b.role)) q("UPDATE users SET role=? WHERE id=?").run(b.role, u.id);
   if (typeof b.banned === "boolean") {
     q("UPDATE users SET banned=? WHERE id=?").run(b.banned ? 1 : 0, u.id);
-    if (b.banned) { revokeSessions(u.id); journal(`Compte @${u.pseudo} suspendu par la modération`); }
-    else journal(`Compte @${u.pseudo} rétabli`);
+    if (b.banned) { revokeSessions(u.id); journal(`Intervention d'urgence de l'administration : compte @${u.pseudo} suspendu`); }
+    else journal(`Compte @${u.pseudo} rétabli par l'administration`);
   }
   return { ok: true };
 });

@@ -14,19 +14,45 @@ export const PARAMS = [
   { k: "majorityPct", l: "Loi : majorité requise", u: "% des exprimés", min: 50, max: 95 },
   { k: "quorumPct", l: "Loi : participation minimum", u: "% des inscrits", min: 0, max: 100 },
   { k: "constMajorityPct", l: "Révision : majorité requise", u: "% des exprimés", min: 50, max: 95 },
-  { k: "constQuorumPct", l: "Révision : participation minimum", u: "% des inscrits", min: 0, max: 100 }
+  { k: "constQuorumPct", l: "Révision : participation minimum", u: "% des inscrits", min: 0, max: 100 },
+  { k: "modReports", l: "Modération : signalements pour ouvrir une affaire", u: "signalements", min: 1, max: 100 },
+  { k: "modJury", l: "Modération : jurés tirés au sort", u: "jurés", min: 3, max: 51 },
+  { k: "modHours", l: "Modération : délai pour juger", u: "heures", min: 6, max: 720 }
 ];
 export const PMETA = Object.fromEntries(PARAMS.map(p => [p.k, p]));
 export const FREE_KEYS = [["preambule", "Préambule"], ["principes", "Article 1 · Principes"], ["charte", "Article 9 · Charte du débat"]];
 
+/** Mesures possibles d'un jury, de la plus légère à la plus sévère. */
+export const MOD_ACTIONS = [
+  { id: "keep", sev: 0, label: "Ne rien faire", desc: "Le signalement n'est pas fondé. Tout reste en place." },
+  { id: "hide", sev: 1, label: "Masquer le contenu", desc: "Le contenu est retiré de la vue publique. Pas de sanction pour l'auteur." },
+  { id: "warn", sev: 2, label: "Masquer et avertir", desc: "Le contenu est retiré et l'auteur reçoit un avertissement." },
+  { id: "suspend7", sev: 3, label: "Masquer et suspendre 7 jours", desc: "L'auteur peut lire mais plus participer pendant 7 jours." },
+  { id: "suspend30", sev: 4, label: "Masquer et suspendre 30 jours", desc: "L'auteur peut lire mais plus participer pendant 30 jours." },
+  { id: "ban", sev: 5, label: "Exclure définitivement", desc: "Le compte est fermé. Réservé aux abus graves ou répétés." }
+];
+/** Pour un compte signalé, il n'y a pas de contenu à masquer. */
+export const actionsFor = type => type === "user"
+  ? MOD_ACTIONS.filter(a => a.id !== "hide").map(a => a.id === "warn" ? { ...a, label: "Avertir", desc: "Le compte reçoit un avertissement." } : a.id === "suspend7" ? { ...a, label: "Suspendre 7 jours" } : a.id === "suspend30" ? { ...a, label: "Suspendre 30 jours" } : a)
+  : MOD_ACTIONS;
+export const REPORT_REASONS = [
+  ["insulte", "Insulte ou attaque personnelle"], ["harcelement", "Harcèlement"], ["haine", "Propos haineux ou discriminatoires"],
+  ["menace", "Menace ou appel à la violence"], ["donnees", "Données personnelles"], ["spam", "Spam ou publicité"],
+  ["fausse-info", "Fausse information manifeste"], ["hors-sujet", "Hors sujet ou doublon"], ["illegal", "Contenu illégal"], ["autre", "Autre"]
+];
+
+/** Complète un état ancien avec les règles ajoutées depuis (valeurs par défaut). */
+export const normalizeCst = c => c && ({ ...c, params: { ...DEFAULT_PARAMS, ...(c.params || {}) }, free: { ...DEFAULT_FREE, ...(c.free || {}) } });
+
 export const DEFAULT_PARAMS = {
   projetMin: 15, projetMax: 90, parrainagePct: 1, parrainageMin: 50, parrainageDays: 60,
-  delibMin: 90, delibMax: 180, voteDays: 7, majorityPct: 50, quorumPct: 5, constMajorityPct: 60, constQuorumPct: 10
+  delibMin: 90, delibMax: 180, voteDays: 7, majorityPct: 50, quorumPct: 5, constMajorityPct: 60, constQuorumPct: 10,
+  modReports: 3, modJury: 7, modHours: 72
 };
 export const DEFAULT_FREE = {
   preambule: "Nous, citoyennes et citoyens, voulons voter pour des idées et non pour des personnes. La présente Constitution fixe les règles par lesquelles nous proposons, débattons et adoptons nos lois. Elle peut elle-même être révisée par tous.",
   principes: "Chaque inscrit dispose d'une voix, quel que soit son âge. Tout débat est public et chaque texte garde la trace de toutes ses versions. Aucune proposition ne peut contourner les étapes prévues par la présente Constitution.",
-  charte: "On débat des idées, jamais des personnes. Les insultes, les propos haineux, les menaces et la publication de données personnelles sont interdits. Un filtre automatique retient ces contenus ; un contenu signalé par trois inscrits est masqué jusqu'à sa relecture. Chaque décision de modération est inscrite dans un journal public."
+  charte: "On débat des idées, jamais des personnes. Les insultes, les propos haineux, les menaces et la publication de données personnelles sont interdits. Un filtre automatique retient ces contenus. Les autres manquements sont signalés et jugés par les inscrits eux-mêmes, selon l'article 10."
 };
 
 export const n_ = v => String(v).replace(".", ",");
@@ -44,7 +70,8 @@ export function constArticles(c) {
     { key: "adoption", title: "Article 6 · Adoption", body: `Une loi est adoptée si les voix « pour » représentent plus de ${n_(p.majorityPct)} % des suffrages exprimés, et si au moins ${n_(p.quorumPct)} % des inscrits ont participé. Les résultats des moins de 18 ans sont aussi publiés séparément.` },
     { key: "evolution", title: "Article 7 · Modification et abrogation", body: "Toute loi adoptée peut être modifiée ou abrogée par une nouvelle proposition, selon la même procédure. Toute proposition peut être reprise par n'importe qui sous forme de variante. L'historique complet de chaque texte reste public." },
     { key: "revision", title: "Article 8 · Révision de la Constitution", body: `Toute disposition de la présente Constitution peut être révisée selon la même procédure. Une révision est adoptée si les voix « pour » représentent plus de ${n_(p.constMajorityPct)} % des suffrages exprimés, et si au moins ${n_(p.constQuorumPct)} % des inscrits ont participé. Une proposition suit les règles en vigueur au jour de son dépôt.` },
-    { key: "charte", title: "Article 9 · Charte du débat", body: f.charte }
+    { key: "charte", title: "Article 9 · Charte du débat", body: f.charte },
+    { key: "moderation", title: "Article 10 · Modération citoyenne", body: `Tout inscrit peut signaler une proposition, une contribution ou un compte. Dès ${p.modReports} signalement${p.modReports > 1 ? "s" : ""}, une affaire est ouverte et confiée à un jury de ${p.modJury} inscrits tirés au sort, hors l'auteur et les auteurs des signalements. Pendant l'examen, une contribution signalée est masquée. Le jury dispose de ${p.modHours} heures. Chaque juré choisit une mesure, de « ne rien faire » à « exclure définitivement » ; la mesure retenue est la médiane des votes. Si moins de la moitié des jurés a voté, le doute profite à l'auteur. L'auteur peut faire appel une fois devant un jury de ${p.modJury * 2 + 1} inscrits. Chaque décision est inscrite au journal public. En cas de contenu manifestement illégal, l'équipe d'administration peut le retirer immédiatement ; cette intervention est aussi inscrite au journal.` }
   ];
 }
 

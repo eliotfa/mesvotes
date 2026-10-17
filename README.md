@@ -45,7 +45,18 @@ Les phases avancent toutes seules : une horloge interne vérifie les échéances
 
 **Et aussi :** tags et thèmes, recherche et filtres (type, phase, thème, tag, porteur, dates, tri), fichiers joints et liens, variantes (reprendre la proposition de quelqu'un d'autre), cahier « Présidentielle 2027 », votes des mineurs comptés et affichés aussi à part.
 
-**Modération :** filtre automatique (insultes, propos haineux, menaces, e-mails et téléphones, messages en majuscules), signalement (3 signalements masquent un message en attendant une relecture), équipe de modération, journal public de chaque décision. On juge la forme, jamais l'opinion.
+**Modération citoyenne :** ce sont les inscrits qui modèrent.
+
+- Tout inscrit peut **signaler** une proposition, une contribution ou un compte, avec un motif (insulte, harcèlement, haine, menace, données personnelles, spam, fausse information, hors sujet, contenu illégal…).
+- Dès **3 signalements**, une **affaire** est ouverte et confiée à un **jury de 7 inscrits tirés au sort**, hors la personne concernée et les auteurs des signalements. Une contribution signalée est masquée pendant l'examen.
+- Chaque juré choisit une mesure : ne rien faire, masquer, avertir, suspendre 7 ou 30 jours, exclure. **La mesure retenue est la médiane des votes** : la plus sévère qu'au moins la moitié du jury juge justifiée.
+- Le jury a **72 heures**. Si moins de la moitié a voté, des remplaçants sont tirés une fois ; ensuite, **le doute profite à l'auteur**.
+- La personne sanctionnée peut **faire appel une fois**, devant un jury de 15 inscrits qui n'a jamais vu l'affaire.
+- Toutes les décisions sont publiques (sans le contenu) sur la page Modération et dans le journal.
+- Ces chiffres sont des règles de la Constitution : ils se changent par une révision votée.
+- Un filtre automatique bloque d'emblée insultes, propos haineux, menaces, e-mails et téléphones. L'administration garde un droit d'**intervention d'urgence** pour les contenus manifestement illégaux, toujours inscrit au journal.
+
+On juge la forme, jamais l'opinion.
 
 ---
 
@@ -187,6 +198,7 @@ mesvotes/
 │   ├── index.js            HTTP, fichiers statiques, en-têtes de sécurité, horloge
 │   ├── api.js              Routes de l'API JSON
 │   ├── lifecycle.js        Cycle de vie des propositions et application des résultats
+│   ├── moderation.js       Signalements, jurys tirés au sort, sanctions, appels
 │   ├── model.js            Accès aux données et mise en forme
 │   ├── db.js               SQLite (node:sqlite) et migrations
 │   ├── auth.js             Mots de passe (scrypt), sessions, jetons
@@ -219,7 +231,12 @@ La Constitution, le calcul des différences et le filtre de modération sont éc
 | `GET` | `/api/proposals/:id` | Détail complet (versions, débat, résultats) |
 | `POST` | `/api/proposals/:id/versions` · `notes` · `parrainage` · `vote` | Participer |
 | `PATCH` | `/api/proposals/:id/meta` | Thèmes et tags (porteur, phase Projet) |
-| `POST` | `/api/notes/:id/decision` · `report` | Amendements, signalements |
+| `POST` | `/api/notes/:id/decision` | Intégrer ou refuser un amendement |
+| `POST` | `/api/reports` | Signaler (`type` : `note`, `proposal` ou `user`, `id`, `reason`, `comment`) |
+| `GET` | `/api/moderation` · `/api/cases/:id` | Décisions publiques, affaires à juger, détail d'une affaire |
+| `POST` | `/api/cases/:id/vote` · `/api/cases/:id/appeal` | Vote d'un juré, appel de la personne concernée |
+| `GET/POST` | `/api/notifications` · `/api/notifications/read` | Notifications |
+| `GET` | `/api/users/:pseudo` | Profil public |
 | `GET` | `/api/laws` · `/api/laws/:id` · `/api/constitution` · `/api/journal` | Données publiques |
 | `POST` | `/api/uploads` | Fichier joint (corps brut, en-tête `x-file-name`) |
 | `GET/POST` | `/api/mod/*` · `/api/admin/*` | Modération et administration |

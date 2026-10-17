@@ -1,7 +1,7 @@
 // mesvotes.fr — interface web (application d'une seule page, sans dépendance).
 import { esc, paras, parseTags, THEMES, PHASES, KINDS, DAY } from "../shared/util.js";
 import { diffView } from "../shared/diff.js";
-import { PARAMS, PMETA, FREE_KEYS, constArticles, constDiffs, paramChanges, n_, fmtParam, sanitizeCst, validateCst } from "../shared/constitution.js";
+import { PARAMS, PMETA, FREE_KEYS, constArticles, constDiffs, paramChanges, n_, fmtParam, sanitizeCst, validateCst, MOD_ACTIONS, actionsFor, REPORT_REASONS } from "../shared/constitution.js";
 import { moderate } from "../shared/moderation.js";
 
 const PH = Object.fromEntries(PHASES.map((p, i) => [p.id, { ...p, i }]));
@@ -28,6 +28,11 @@ const cstNow = () => BOOT.constitution[BOOT.constitution.length - 1];
 const isMod = () => me() && (me().role === "moderator" || me().role === "admin");
 const isAdmin = () => me() && me().role === "admin";
 const needsVerify = () => BOOT.mailEnabled && me() && !me().emailVerified;
+const suspended = () => me() && me().suspendedUntil > Date.now();
+const userLink = p => `<a class="ulink" href="#/u/${encodeURIComponent(p)}">@${esc(p)}</a>`;
+const REASON_LABEL = Object.fromEntries(REPORT_REASONS);
+const TYPE_LABEL = { note: "Contribution", proposal: "Proposition", user: "Compte" };
+const actionLabel = (type, id) => (actionsFor(type).find(a => a.id === id) || MOD_ACTIONS.find(a => a.id === id) || { label: id }).label;
 
 /* ---------- API ---------- */
 class ApiError extends Error { constructor(status, body) { super(body.error || "Erreur"); this.status = status; this.body = body; } }
@@ -75,9 +80,9 @@ const needQuo = p => p.kind === "const" ? p.rules.constQuorumPct : p.rules.quoru
 /* ---------- en-tête ---------- */
 function renderHeader() {
   const nav = [["#/", "Propositions", "home"], ["#/lois", "Lois", "laws"], ["#/constitution", "Constitution", "const"], ["#/2027", "2027", "y2027"], ["#/comment", "Comment ça marche", "how"]];
-  if (isMod()) nav.push(["#/moderation", "Modération", "mod"]);
+  nav.push(["#/moderation", `Modération${me()?.duties ? ` <span class="badge">${me().duties}</span>` : ""}`, "mod"]);
   if (isAdmin()) nav.push(["#/admin", "Admin", "admin"]);
-  const cur = VIEW ? ({ detail: "home", new: "home", law: "laws" }[VIEW.name] || VIEW.name) : "";
+  const cur = VIEW ? ({ detail: "home", new: "home", law: "laws", case: "mod" }[VIEW.name] || VIEW.name) : "";
   const u = me();
   $("#top").innerHTML = `<div class="wrap">
     <a class="brand" href="#/" aria-label="mesvotes.fr, accueil" style="text-decoration:none;color:inherit">
@@ -87,12 +92,14 @@ function renderHeader() {
     <nav class="main" aria-label="Navigation">${nav.map(([h, l, k]) => `<a class="navbtn" href="${h}" aria-current="${cur === k}" style="text-decoration:none">${l}</a>`).join("")}</nav>
     <div class="top-actions">
       <a class="btn primary" href="#/proposer" style="text-decoration:none">Proposer</a>
-      ${u ? `<a class="me-pill" href="#/compte" aria-label="Mon compte" style="text-decoration:none;color:inherit">${avatar(u.pseudo)}<span>${esc(u.pseudo)}</span>${u.minor ? '<span class="minor">-18</span>' : ""}</a>`
+      ${u ? `<a class="me-pill" href="#/compte" aria-label="Mon compte" style="text-decoration:none;color:inherit">${avatar(u.pseudo)}<span>${esc(u.pseudo)}</span>${u.minor ? '<span class="minor">-18</span>' : ""}${u.unread ? `<span class="badge" aria-label="${u.unread} notification(s)">${u.unread}</span>` : ""}</a>`
           : `<a class="btn" href="#/connexion" style="text-decoration:none;color:inherit">Se connecter</a>`}
     </div></div>`;
   const band = $("#band");
   const msgs = [];
   if (BOOT.demoMode) msgs.push(`<b>Démo</b><span>Ce serveur est en mode démo : les administrateurs peuvent accélérer le temps.</span>`);
+  if (suspended()) msgs.push(`<b>Suspendu</b><span>Ton compte est suspendu jusqu'au ${fmtD(me().suspendedUntil)} par décision d'un jury citoyen. Tu peux lire et <a href="#/moderation" style="color:inherit">faire appel</a>.</span>`);
+  if (me()?.duties) msgs.push(`<b>Jury</b><span>Tu as été tiré(e) au sort pour juger ${me().duties > 1 ? me().duties + " affaires" : "une affaire"} de modération. <a href="#/moderation" style="color:inherit">Donner mon avis</a></span>`);
   if (needsVerify()) msgs.push(`<b>E-mail</b><span>Confirme ton adresse pour proposer, parrainer et voter. <a href="#/compte" style="color:inherit">Renvoyer le lien</a></span>`);
   band.hidden = !msgs.length;
   band.innerHTML = msgs.length ? `<div class="wrap">${msgs.join("")}</div>` : "";
@@ -221,7 +228,8 @@ function detailHtml(d) {
   const tagEdit = UI.editingTags && d.isAuthor;
   return `
   <a class="btn ghost small back" href="#/" style="text-decoration:none">← Toutes les propositions</a>
-  ${d.hidden ? `<div class="notice warn">Cette proposition est masquée par la modération. Seule l'équipe de modération la voit.</div>` : ""}
+  ${d.hidden ? `<div class="notice warn">Cette proposition a été masquée par décision d'un jury citoyen ou de l'administration. Elle n'est plus visible du public.</div>` : ""}
+  ${d.underReview && !d.hidden ? `<div class="notice">Cette proposition a été signalée : un jury citoyen tiré au sort l'examine. Elle reste visible pendant l'examen.</div>` : ""}
   <div class="detail">
     <div>
       <div class="chips">${chipsHtml(d, true)}${d.phase === "projet" && d.isAuthor && !tagEdit ? `<button class="btn small ghost" data-act="edit-tags">Gérer thèmes et tags</button>` : ""}</div>
@@ -232,7 +240,7 @@ function detailHtml(d) {
         <div class="btnrow"><button class="btn primary small" type="submit">Enregistrer</button><button class="btn ghost small" type="button" data-act="cancel-tags">Annuler</button></div></form>` : ""}
       <h1 class="dtitle">${esc(d.title)}</h1>
       <p class="summary">${esc(d.summary)}</p>
-      <div class="meta" style="margin-bottom:20px">${avatar(d.author.pseudo)}<span>Portée par <button class="linkbtn" data-act="gofilter" data-k="author" data-val="${esc(d.author.pseudo)}">@${esc(d.author.pseudo)}</button></span>${d.author.minor ? '<span class="minor">-18</span>' : ""}<span>· déposée le ${fmtD(d.dates.projet)}</span>
+      <div class="meta" style="margin-bottom:20px">${avatar(d.author.pseudo)}<span>Portée par ${userLink(d.author.pseudo)}</span>${d.author.minor ? '<span class="minor">-18</span>' : ""}<span>· déposée le ${fmtD(d.dates.projet)}</span>
         ${d.fork ? `<span>· variante de <a href="#/p/${d.fork.id}">${esc(d.fork.title)}</a></span>` : ""}
         ${d.lawId ? `<span>· devenue <a href="#/loi/${d.lawId}">une loi</a></span>` : ""}</div>
       ${textSections(d)}
@@ -321,17 +329,17 @@ function noteHtml(d, n) {
   const typeLbl = { comment: "Commentaire", amend: "Amendement", source: "Source" }[n.type];
   const stLbl = { pending: "En attente du porteur", accepted: "Intégré au texte", refused: "Non retenu" };
   let body;
-  if (n.removed) body = `<p class="hidden-note">Retiré par la modération après relecture.</p>`;
-  else if (n.masked && n.text === undefined) body = `<p class="hidden-note">Masqué après ${n.reports} signalements, en attente de relecture par la modération.</p>`;
-  else body = `${n.masked ? `<p class="hidden-note">Masqué pour les autres après ${n.reports} signalements, en attente de relecture.</p>` : ""}
+  if (n.removed) body = `<p class="hidden-note">Retiré par décision d'un jury citoyen.</p>`;
+  else if (n.masked && n.text === undefined) body = `<p class="hidden-note">Masqué pendant l'examen par un jury citoyen tiré au sort.</p>`;
+  else body = `${n.masked ? `<p class="hidden-note">Masqué pour les autres pendant l'examen par un jury citoyen.</p>` : ""}
     ${n.type === "amend" ? `<div class="amend-box"><div class="lbl">${n.base ? "Changement proposé" : "Paragraphe ajouté"}</div><div class="diff">${diffView(n.base || "", n.proposed).html}</div></div>` : ""}<p>${linkify(n.text)}</p>`;
-  const canReport = me() && !n.mine && !n.removed && !(n.masked && n.text === undefined) && d.phase !== "fin";
+  const canReport = me() && !n.mine && !n.removed && !n.masked;
   return `<article class="note">${avatar(n.author)}<div class="body">
-    <div class="head"><strong>@${esc(n.author)}</strong>${n.minor ? '<span class="minor">-18</span>' : ""}<span class="ntype ${n.type}">${typeLbl}${n.type === "amend" ? " §" + n.para : ""}</span><span>${fmtD(n.date)}</span>${n.type === "amend" ? `<span class="status ${n.status}">${stLbl[n.status]}</span>` : ""}</div>
+    <div class="head"><strong>${userLink(n.author)}</strong>${n.minor ? '<span class="minor">-18</span>' : ""}<span class="ntype ${n.type}">${typeLbl}${n.type === "amend" ? " §" + n.para : ""}</span><span>${fmtD(n.date)}</span>${n.type === "amend" ? `<span class="status ${n.status}">${stLbl[n.status]}</span>` : ""}</div>
     ${body}
     <div class="note-actions">
       ${n.type === "amend" && n.status === "pending" && d.phase === "projet" && d.isAuthor ? `<button class="btn small" data-act="decide" data-n="${n.id}" data-v="accept">Intégrer au texte</button><button class="btn small ghost" data-act="decide" data-n="${n.id}" data-v="refuse">Ne pas retenir</button>` : ""}
-      ${canReport ? `<button class="btn small ghost" data-act="report" data-n="${n.id}" ${n.myReport ? "disabled" : ""}>${n.myReport ? "Signalé" : "Signaler"}</button>` : ""}
+      ${canReport ? `<button class="btn small ghost" data-act="report" data-type="note" data-id="${n.id}" ${n.myReport ? "disabled" : ""}>${n.myReport ? "Signalé" : "Signaler"}</button>` : ""}
     </div></div></article>`;
 }
 function timelineHtml(d) {
@@ -391,7 +399,8 @@ function sideHtml(d) {
   return `<div class="section">${timelineHtml(d)}</div>
     <div class="section action">${a}</div>
     <div class="section"><h2>Reprendre cette idée</h2><p class="muted" style="margin:0 0 10px;font-size:13px">Pas d'accord avec la direction prise ? Crée ta propre version, avec un lien vers celle-ci.</p><a class="btn small" href="#/variante/${d.id}" style="text-decoration:none;color:inherit">Créer une variante</a></div>
-    ${isMod() ? `<div class="section"><h2>Modération</h2><button class="btn small" data-act="mod-prop" data-v="${d.hidden ? "restore" : "hide"}">${d.hidden ? "Rétablir la proposition" : "Masquer la proposition"}</button></div>` : ""}
+    ${me() && !d.isAuthor && !d.hidden ? `<div class="section"><h2>Un problème ?</h2><p class="muted" style="margin:0 0 10px;font-size:13px">Insulte, haine, spam, données personnelles… Un jury citoyen tiré au sort examinera le signalement.</p><button class="btn small ghost" data-act="report" data-type="proposal" data-id="${d.id}" ${d.myFlag ? "disabled" : ""}>${d.myFlag ? "Signalée" : "Signaler cette proposition"}</button></div>` : ""}
+    ${isMod() ? `<div class="section"><h2>Administration</h2><p class="muted" style="margin:0 0 10px;font-size:13px">Seulement pour un contenu manifestement illégal. L'intervention est inscrite au journal public.</p>${d.hidden ? `<button class="btn small" data-act="mod-prop" data-v="restore">Rétablir la proposition</button>` : `<button class="btn small" data-act="urgent" data-type="proposal" data-id="${d.id}">Retirer en urgence</button>`}</div>` : ""}
     ${BOOT.demoMode && isAdmin() && d.phase !== "fin" ? `<div class="section demo-box"><h2 style="margin-bottom:8px">Démo · accélérer le temps</h2>
       <p class="muted" style="margin:0 0 10px;font-size:13px">Passe à l'étape suivante sans attendre. À la clôture, le résultat est calculé avec les vrais votes.</p>
       <button class="btn ink small" data-act="advance">Passer à : ${PHASES[PH[d.phase].i + 1].name} →</button></div>` : ""}`;
@@ -590,10 +599,13 @@ async function viewAccount(params) {
   VIEW = { name: "account", data: null };
   if (!me()) return viewLogin();
   const u = me(), ok = params.get("ok");
+  const notifs = await api("GET", "/api/notifications").catch(() => ({ items: [] }));
+  if (notifs.items.some(n => !n.read)) api("POST", "/api/notifications/read").then(() => { me().unread = 0; renderHeader(); }).catch(() => {});
   return `<div class="page-head"><h1>@${esc(u.pseudo)}</h1><p>${esc(u.email)} · ${u.minor ? "moins de 18 ans" : "18 ans ou plus"} · ${{ user: "membre", moderator: "modération", admin: "administration" }[u.role]}</p></div>
   ${ok === "verifie" ? `<div class="notice ok">Adresse confirmée. Tu peux maintenant proposer, parrainer et voter.</div>` : ok === "lien-expire" ? `<div class="notice warn">Ce lien a expiré ou a déjà servi. Demande-en un nouveau ci-dessous.</div>` : ""}
+  <div class="section"><h2>Notifications</h2>${notifs.items.length ? `<ul class="journal">${notifs.items.map(n => `<li class="${n.read ? "" : "unread"}"><span class="dt">${fmtDs(n.date)}</span><span>${n.link ? `<a href="${esc(n.link)}">${esc(n.text)}</a>` : esc(n.text)}</span></li>`).join("")}</ul>` : `<p class="muted" style="margin:0">Rien pour l'instant.</p>`}</div>
   <div class="grid2">
-    <div class="section"><h2>Mon activité</h2><div class="btnrow"><button class="btn" data-act="mine-list">Voir mes propositions</button><a class="btn primary" href="#/proposer" style="text-decoration:none">Proposer</a></div>
+    <div class="section"><h2>Mon activité</h2><div class="btnrow"><a class="btn" href="#/u/${encodeURIComponent(u.pseudo)}" style="text-decoration:none;color:inherit">Mon profil public</a><button class="btn" data-act="mine-list">Voir mes propositions</button><a class="btn primary" href="#/proposer" style="text-decoration:none">Proposer</a></div>
       ${needsVerify() ? `<p style="margin:14px 0 8px;font-size:14px">Ton adresse n'est pas encore confirmée.</p><button class="btn small" data-act="resend">Renvoyer le lien de confirmation</button>` : ""}</div>
     <div class="section"><h2>Changer de mot de passe</h2><form class="stack" data-form="password">
       <label class="f">Mot de passe actuel<input type="password" id="cp" required autocomplete="current-password"></label>
@@ -609,25 +621,91 @@ async function viewAccount(params) {
 
 /* ---------- modération et administration ---------- */
 async function viewMod() {
-  if (!isMod()) return `<div class="empty">Réservé à l'équipe de modération.</div>`;
-  const data = await api("GET", "/api/mod/queue"); VIEW = { name: "mod", data };
-  return `<div class="page-head"><h1>Modération</h1><p>Contributions signalées, des plus urgentes aux moins urgentes. Chaque décision est inscrite dans le journal public.</p></div>
-  <div class="section"><h2>À relire · ${data.notes.length}</h2>${data.notes.map(n => `<div class="queue-item">
-    <div class="meta"><strong style="color:var(--ink)">@${esc(n.pseudo)}</strong><span>sur <a href="#/p/${n.pid}">${esc(n.title)}</a></span><span>· ${fmtD(n.date)}</span><span class="pill ${n.hidden ? "warn" : ""}">${n.reports} signalement${n.reports > 1 ? "s" : ""}${n.hidden ? " · masqué" : ""}</span></div>
-    <blockquote>${esc(n.text)}${n.proposed ? `\n\nRédaction proposée : ${esc(n.proposed)}` : ""}</blockquote>
-    <div class="btnrow"><button class="btn small" data-act="mod-note" data-n="${n.id}" data-v="restore">Rétablir (critique légitime)</button><button class="btn small primary" data-act="mod-note" data-n="${n.id}" data-v="remove">Retirer</button></div></div>`).join("") || `<p class="muted" style="margin:0">Rien à relire.</p>`}</div>
-  ${data.hiddenProposals.length ? `<div class="section"><h2>Propositions masquées</h2><ul class="mini">${data.hiddenProposals.map(p => `<li><a class="minilink" href="#/p/${p.id}"><span class="t">${esc(p.title)}</span></a></li>`).join("")}</ul></div>` : ""}`;
+  const data = await api("GET", "/api/moderation"); VIEW = { name: "mod", data };
+  const r = data.rules;
+  const caseRow = c => `<a class="minilink" href="#/affaire/${c.id}"><span class="t">${TYPE_LABEL[c.targetType]} · affaire ${esc(c.short)}${c.round === 2 ? " (appel)" : ""}</span>
+    <span class="meta">${c.status === "open" ? `<span class="pill">à juger avant le ${fmtD(c.deadline)}</span>` : `<span class="pill">${esc(actionLabel(c.targetType, c.decision))}</span>`}${c.reasons[0] ? `<span>${esc(REASON_LABEL[c.reasons[0][0]])}</span>` : ""}${c.myVote !== undefined ? `<span>${c.myVote ? "✓ tu as voté" : "<strong>ton vote est attendu</strong>"}</span>` : ""}</span></a>`;
+  return `<div class="page-head"><h1>Modération citoyenne</h1><p>Ici, ce sont les inscrits qui modèrent. Dès ${r.modReports} signalement${r.modReports > 1 ? "s" : ""}, un jury de ${r.modJury} inscrits est tiré au sort. Il a ${r.modHours} heures pour choisir une mesure ; la mesure retenue est la médiane des votes. L'auteur peut faire appel une fois devant un jury de ${r.modJury * 2 + 1} inscrits.</p></div>
+  ${me() ? `<div class="grid2">
+    <div class="section"><h2>À juger · ${data.duties.length}</h2>${data.duties.length ? `<ul class="mini">${data.duties.map(c => `<li>${caseRow(c)}</li>`).join("")}</ul>` : `<p class="muted" style="margin:0;font-size:14px">Aucune affaire pour toi en ce moment. Quand tu es tiré(e) au sort, tu es prévenu(e) ici et dans tes notifications.</p>`}</div>
+    <div class="section"><h2>Me concernant · ${data.mine.length}</h2>${data.mine.length ? `<ul class="mini">${data.mine.map(c => `<li>${caseRow(c)}</li>`).join("")}</ul>` : `<p class="muted" style="margin:0;font-size:14px">Aucun signalement ne te concerne.</p>`}</div>
+  </div>` : `<div class="notice"><a href="#/inscription">Inscris-toi</a> pour pouvoir signaler et être tiré(e) au sort comme juré.</div>`}
+  ${data.open ? `<div class="section"><h2>Affaires en cours · ${data.open.length} <span class="muted">(visible par l'administration)</span></h2>${data.open.map(c => `<div class="queue-item">
+      <div class="meta"><strong style="color:var(--ink)">${TYPE_LABEL[c.targetType]} de ${userLink(c.snapshot.author)}</strong><span>· affaire <a href="#/affaire/${c.id}">${esc(c.short)}</a></span><span>· ${c.votes}/${c.jurySize} votes</span><span>· échéance ${fmtD(c.deadline)}</span></div>
+      <blockquote>${esc(c.snapshot.title || c.snapshot.text || ("Compte @" + c.snapshot.author))}</blockquote>
+      ${c.targetType !== "user" ? `<div class="btnrow"><button class="btn small" data-act="urgent" data-type="${c.targetType}" data-id="${esc(c.targetId)}">Retirer en urgence (contenu illégal)</button></div>` : ""}</div>`).join("") || `<p class="muted" style="margin:0">Aucune.</p>`}</div>` : ""}
+  <div class="section"><h2>Décisions récentes · ${data.closed.length}</h2>${data.closed.length ? `<div class="tablewrap"><table class="admin-table"><thead><tr><th>Date</th><th>Affaire</th><th>Motif principal</th><th>Décision</th><th>Votes</th></tr></thead><tbody>
+    ${data.closed.map(c => `<tr><td class="mono">${fmtDs(c.closedAt)}</td><td><a href="#/affaire/${c.id}">${TYPE_LABEL[c.targetType]} · ${esc(c.short)}</a>${c.round === 2 ? " (appel)" : ""}</td><td>${c.reasons[0] ? esc(REASON_LABEL[c.reasons[0][0]]) : "—"}</td><td>${esc(actionLabel(c.targetType, c.decision))}${c.note ? ` <span class="muted">· ${esc(c.note)}</span>` : ""}</td><td class="mono">${c.votes}/${c.jurySize}</td></tr>`).join("")}
+  </tbody></table></div>` : `<p class="muted" style="margin:0">Aucune décision pour l'instant.</p>`}</div>`;
 }
+
+async function viewCase(id) {
+  const c = await api("GET", "/api/cases/" + encodeURIComponent(id)); VIEW = { name: "case", data: c };
+  const s = c.snapshot;
+  let content = "";
+  if (s) {
+    if (s.type === "note") content = `<p class="muted" style="margin:0 0 8px;font-size:14px">${s.noteType === "amend" ? "Amendement" : s.noteType === "source" ? "Source" : "Commentaire"} de ${userLink(s.author)} sur <a href="#/p/${s.proposalId}">${esc(s.proposalTitle)}</a> · ${fmtD(s.date)}</p>
+      ${s.noteType === "amend" ? `<div class="diff" style="margin-bottom:8px">${diffView(s.base || "", s.proposed || "").html}</div>` : ""}<blockquote class="quote">${esc(s.text)}</blockquote>`;
+    else if (s.type === "proposal") content = `<p class="muted" style="margin:0 0 8px;font-size:14px">Proposition de ${userLink(s.author)} · <a href="#/p/${s.proposalId}">ouvrir</a></p><h3 style="margin:0 0 6px;font-size:20px">${esc(s.title)}</h3><p style="margin:0 0 12px">${esc(s.summary)}</p>${numbered(s.text)}`;
+    else content = `<p style="margin:0 0 10px">Compte ${userLink(s.author)}, inscrit le ${fmtD(s.memberSince)}. Dernières contributions :</p>${s.recent.length ? s.recent.map(x => `<div class="queue-item"><div class="meta">sur <a href="#/p/${x.proposalId}">${esc(x.proposalTitle)}</a> · ${fmtD(x.date)}</div><blockquote>${esc(x.text)}</blockquote></div>`).join("") : `<p class="muted">Aucune contribution visible.</p>`}`;
+  }
+  const tallyBars = (t, type) => { const tot = Object.values(t || {}).reduce((a, b) => a + b, 0) || 1; return actionsFor(type).map(a => `<div class="res-row"><span>${esc(a.label)}</span><div class="bar" style="--c:var(--ink)"><span style="width:${(t?.[a.id] || 0) / tot * 100}%"></span></div><span class="pct">${t?.[a.id] || 0}</span></div>`).join(""); };
+  const open = c.status === "open";
+  return `<a class="btn ghost small back" href="#/moderation" style="text-decoration:none">← Modération citoyenne</a>
+  <div class="page-head"><h1>Affaire ${esc(c.short)}</h1><p>${TYPE_LABEL[c.targetType]} signalé${c.targetType === "user" ? "" : "e"} · ${c.round === 2 ? "appel devant un jury élargi" : "premier examen"} · ${open ? `jury de ${c.jurySize} inscrits, ${c.votes} vote${c.votes > 1 ? "s" : ""}, échéance le ${fmtD(c.deadline)}` : `close le ${fmtD(c.closedAt)}`}</p>
+    <div class="chips">${c.reasons.map(([r, n]) => `<span class="tag">${esc(REASON_LABEL[r])} · ${n}</span>`).join("")}</div></div>
+  <div class="cols"><div>
+    ${s ? `<section class="section"><h2>Ce qui est signalé</h2>${content}</section>` : `<div class="notice">Le contenu de l'affaire n'est visible que par les jurés, la personne concernée et l'administration.</div>`}
+    ${c.comments?.length ? `<section class="section"><h2>Commentaires des signalements (anonymes)</h2><ul class="journal">${c.comments.map(x => `<li><span class="dt">${esc(REASON_LABEL[x.reason])}</span><span>${esc(x.comment)}</span></li>`).join("")}</ul></section>` : ""}
+    ${c.firstDecision ? `<section class="section"><h2>Première décision (contestée)</h2><p style="margin:0">« ${esc(actionLabel(c.targetType, c.firstDecision))} »</p></section>` : ""}
+    ${!open ? `<section class="section"><h2>Décision du jury</h2><div class="result-banner" style="--c:${c.decision === "keep" ? "var(--pour)" : "var(--ink)"}">${esc(actionLabel(c.targetType, c.decision))}</div>${c.note ? `<p class="muted" style="margin:0 0 10px">${esc(c.note)}</p>` : ""}${tallyBars(c.tally, c.targetType)}
+      <p class="muted" style="margin:10px 0 0;font-size:13px">${c.votes} juré${c.votes > 1 ? "s" : ""} sur ${c.jurySize} ont voté. La mesure retenue est la médiane : la plus sévère qu'au moins la moitié des jurés juge justifiée.</p></section>` : ""}
+    ${c.juryComments?.length ? `<section class="section"><h2>Remarques des jurés (anonymes)</h2><ul class="journal">${c.juryComments.map(x => `<li><span class="dt">${esc(actionLabel(c.targetType, x.vote))}</span><span>${esc(x.comment)}</span></li>`).join("")}</ul></section>` : ""}
+  </div>
+  <aside class="side">
+    ${c.isJuror && open ? `<div class="section action"><h3>Ton vote</h3><p>Choisis la mesure qui te semble juste. Tu peux changer d'avis jusqu'à la clôture. Ton vote reste anonyme.</p>
+      <form class="stack" data-form="jury"><div class="votebtns">${c.actions.map(a => `<label class="optrow"><input type="radio" name="action" value="${a.id}" ${c.myVote === a.id ? "checked" : ""} required><span><strong>${esc(a.label)}</strong><small>${esc(a.desc)}</small></span></label>`).join("")}</div>
+      <label class="f">Remarque pour les autres jurés <small>Facultatif, anonyme.</small><textarea id="j-comment" rows="2" maxlength="500">${esc(c.myComment || "")}</textarea></label>
+      <div class="form-msg"></div><button class="btn primary" type="submit">${c.myVote ? "Modifier mon vote" : "Voter"}</button></form></div>` : ""}
+    ${c.isJuror && !open ? `<div class="section"><p style="margin:0">Merci d'avoir participé à ce jury.</p></div>` : ""}
+    ${c.isTarget ? `<div class="section action"><h3>Te concernant</h3><p>${open ? "Un jury citoyen tiré au sort examine ce signalement. Tu seras prévenu(e) de la décision." : c.decision === "keep" ? "Aucune mesure n'a été prise." : c.round === 2 ? "Cette décision d'appel est définitive." : "Tu peux contester cette décision une fois, dans les 7 jours, devant un jury élargi qui n'a jamais vu l'affaire."}</p>
+      ${c.canAppeal ? `<button class="btn primary" data-act="appeal" data-id="${c.id}">Faire appel</button>` : ""}${c.appealCase ? `<a class="btn" href="#/affaire/${c.appealCase}" style="text-decoration:none;color:inherit">Voir l'appel</a>` : ""}</div>` : ""}
+    <div class="section"><h2>Comment ça marche</h2><p class="muted" style="margin:0;font-size:13px">Les jurés sont tirés au sort parmi les inscrits, hors la personne concernée et les auteurs des signalements. Si moins de la moitié vote, des remplaçants sont tirés une fois ; ensuite, le doute profite à l'auteur.</p></div>
+  </aside></div>`;
+}
+
+async function viewProfile(pseudo) {
+  const u = await api("GET", "/api/users/" + encodeURIComponent(pseudo)); VIEW = { name: "profile", data: u };
+  return `<div class="page-head"><div class="chips">${avatar(u.pseudo)}${u.minor ? '<span class="minor">-18</span>' : ""}${u.closed ? '<span class="pill">compte fermé</span>' : ""}${u.suspended ? '<span class="pill warn">suspendu</span>' : ""}${u.fictional ? '<span class="pill">compte d\'exemple</span>' : ""}</div>
+    <h1 style="margin-top:12px">@${esc(u.pseudo)}</h1><p>Inscrit le ${fmtD(u.memberSince)} · ${plural(u.proposals.length, "proposition")} · ${plural(u.notesCount, "contribution")}</p></div>
+  <div class="cols"><div class="section"><h2>Propositions portées</h2>${u.proposals.length ? `<ul class="mini">${u.proposals.map(p => `<li><a class="minilink" href="#/p/${p.id}"><span class="t">${esc(p.title)}</span> <span class="meta">${kindChip(p.kind)}${phaseChip(p)}</span></a></li>`).join("")}</ul>` : `<p class="muted" style="margin:0">Aucune pour l'instant.</p>`}</div>
+  <aside class="side">${me() && !u.isMe && !u.closed ? `<div class="section"><h2>Un problème ?</h2><p class="muted" style="margin:0 0 10px;font-size:13px">Harcèlement, comportement répété… Signale le compte : un jury citoyen examinera son activité.</p><button class="btn small ghost" data-act="report" data-type="user" data-id="${esc(u.pseudo)}" ${u.myFlag ? "disabled" : ""}>${u.myFlag ? "Compte signalé" : "Signaler ce compte"}</button></div>` : ""}
+    ${u.isMe ? `<div class="section"><a class="btn" href="#/compte" style="text-decoration:none;color:inherit">Mon compte</a></div>` : ""}</aside></div>`;
+}
+
+function openReport(type, id) {
+  const r = cstNow().params;
+  $("#modal-root").innerHTML = `<div class="overlay" data-act="close-modal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="rp-t">
+    <h2 id="rp-t">Signaler</h2><p>${TYPE_LABEL[type]} · dès ${r.modReports} signalement${r.modReports > 1 ? "s" : ""}, un jury de ${r.modJury} inscrits tirés au sort décidera de la mesure à prendre. On juge la forme, jamais l'opinion.</p>
+    <form class="stack" data-form="report" data-type="${type}" data-id="${esc(id)}">
+      <div class="reasons">${REPORT_REASONS.map(([k, l], i) => `<label class="optrow"><input type="radio" name="reason" value="${k}" ${i === 0 ? "" : ""} required><span>${esc(l)}</span></label>`).join("")}</div>
+      <label class="f">Précisions pour le jury <small>Facultatif, anonyme. 500 caractères.</small><textarea id="rp-comment" rows="2" maxlength="500"></textarea></label>
+      <div class="form-msg"></div>
+      <div class="btnrow"><button class="btn primary" type="submit">Envoyer le signalement</button><button class="btn ghost" type="button" data-act="close-modal-btn">Annuler</button></div>
+    </form></div></div>`;
+}
+const closeModal = () => { $("#modal-root").innerHTML = ""; };
+
 async function viewAdmin(params) {
   if (!isAdmin()) return `<div class="empty">Réservé aux administrateurs.</div>`;
   const qs = params.get("q") || "";
   const data = await api("GET", "/api/admin/users?q=" + encodeURIComponent(qs)); VIEW = { name: "admin", data };
-  return `<div class="page-head"><h1>Administration</h1><p>Comptes inscrits : rôles et suspensions. ${fmtN(BOOT.electorate)} inscrits comptent dans le corps électoral.</p></div>
+  return `<div class="page-head"><h1>Administration</h1><p>Comptes inscrits. La modération courante est faite par des jurys citoyens ; ici, seulement les rôles et les interventions d'urgence (inscrites au journal public). ${fmtN(BOOT.electorate)} inscrits comptent dans le corps électoral.</p></div>
   <form class="toolbar" data-form="usersearch"><input class="search" id="us" type="search" value="${esc(qs)}" placeholder="Chercher un e-mail ou un pseudo" aria-label="Chercher un compte"><button class="btn" type="submit">Chercher</button></form>
   <div class="section tablewrap"><table class="admin-table"><thead><tr><th>Pseudo</th><th>E-mail</th><th>Âge</th><th>Inscrit le</th><th>Rôle</th><th>Statut</th></tr></thead><tbody>
   ${data.items.map(u => `<tr><td>@${esc(u.pseudo)}</td><td>${esc(u.email)}${u.emailVerified ? "" : ' <span class="pill warn">non confirmé</span>'}</td><td>${u.minor ? "-18" : "18+"}</td><td class="mono">${fmtDs(u.createdAt)}</td>
     <td>${u.id === me().id ? esc(u.role) : `<select data-act="role" data-u="${u.id}" aria-label="Rôle de ${esc(u.pseudo)}">${["user", "moderator", "admin"].map(r => `<option value="${r}" ${u.role === r ? "selected" : ""}>${{ user: "membre", moderator: "modération", admin: "admin" }[r]}</option>`).join("")}</select>`}</td>
-    <td>${u.id === me().id ? "" : `<button class="btn small ${u.banned ? "" : "ghost"}" data-act="ban" data-u="${u.id}" data-v="${u.banned ? "0" : "1"}">${u.banned ? "Rétablir" : "Suspendre"}</button>`}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">Aucun compte.</td></tr>`}
+    <td>${u.suspendedUntil > Date.now() ? `<span class="pill warn">suspendu jusqu'au ${fmtDs(u.suspendedUntil)}</span> ` : ""}${u.id === me().id ? "" : `<button class="btn small ${u.banned ? "" : "ghost"}" data-act="ban" data-u="${u.id}" data-v="${u.banned ? "0" : "1"}">${u.banned ? "Rétablir" : "Suspendre"}</button>`}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">Aucun compte.</td></tr>`}
   </tbody></table></div>`;
 }
 
@@ -659,9 +737,10 @@ async function viewHow() {
       <li>Plus tard : une vérification d'identité pour garantir une personne = un compte.</li></ul></div>
     <div class="section"><h2>Comment on modère</h2><ul>
       <li><strong>Filtre automatique</strong> : insultes, haine, menaces, données personnelles, majuscules. L'auteur sait pourquoi.</li>
-      <li><strong>Signalement</strong> : à 3 signalements, le message est masqué en attendant une relecture.</li>
-      <li><strong>Relecture humaine</strong> par l'équipe de modération.</li>
-      <li><strong>Journal public</strong> de chaque action, sans le contenu.</li></ul></div>
+      <li><strong>Signalement</strong> d'une proposition, d'une contribution ou d'un compte, avec un motif.</li>
+      <li><strong>Jury citoyen</strong> : dès ${r.modReports} signalements, ${r.modJury} inscrits tirés au sort choisissent la mesure ; on retient la médiane.</li>
+      <li><strong>Appel</strong> possible une fois, devant un jury élargi.</li>
+      <li><strong>Journal public</strong> de chaque décision, sans le contenu. <a href="#/moderation">Voir les décisions</a></li></ul></div>
   </div>
   <div class="section prose"><h2>Journal de modération</h2><ul class="journal">${j.items.map(x => `<li><span class="dt">${fmtDs(x.date)}</span><span>${esc(x.text)}</span></li>`).join("") || `<li><span></span><span class="muted">Rien pour l'instant.</span></li>`}</ul></div>`;
 }
@@ -707,6 +786,8 @@ async function render(scrollTop = true) {
       case "reinitialiser": html = viewReset(params); break;
       case "compte": html = await viewAccount(params); break;
       case "moderation": html = await viewMod(); break;
+      case "affaire": html = await viewCase(parts[1]); break;
+      case "u": html = await viewProfile(parts[1]); break;
       case "admin": html = await viewAdmin(params); break;
       default: VIEW = { name: "404" }; html = `<div class="empty">Page introuvable. <a href="#/">Retour à l'accueil</a></div>`;
     }
@@ -765,8 +846,19 @@ document.addEventListener("click", async e => {
       if (await act(() => api("POST", `/api/notes/${el.dataset.n}/decision`, { decision: el.dataset.v }), el.dataset.v === "accept" ? "Amendement intégré : nouvelle version publiée." : "Amendement non retenu. Il reste visible dans le débat.")) rerender();
       return;
     case "report":
-      if (await act(() => api("POST", `/api/notes/${el.dataset.n}/report`), "Signalement reçu. Merci.")) rerender();
+      if (!me()) { UI.after = location.hash; return go("#/connexion"); }
+      openReport(el.dataset.type, el.dataset.id); return;
+    case "close-modal": if (e.target === el) closeModal(); return;
+    case "close-modal-btn": closeModal(); return;
+    case "urgent":
+      if (!el.dataset.confirm) { el.dataset.confirm = "1"; el.textContent = "Confirmer le retrait ?"; return; }
+      if (await act(() => api("POST", "/api/mod/urgent", { type: el.dataset.type, id: el.dataset.id }), "Retiré. L'intervention est inscrite au journal public.")) rerender();
       return;
+    case "appeal": {
+      const r = await act(() => api("POST", `/api/cases/${el.dataset.id}/appeal`), "Appel enregistré : un nouveau jury va réexaminer l'affaire.");
+      if (r) go("#/affaire/" + r.caseId);
+      return;
+    }
     case "advance": {
       const r = await act(() => api("POST", `/api/proposals/${d.id}/advance`));
       if (r) { await loadBoot(); toast(r.result ? (r.result.outcome === "adopted" ? "Adoptée. " + (r.result.applied || "") : r.result.outcome === "expired" ? "Archivée : parrainage insuffisant." : "Rejetée.") : "Étape suivante."); rerender(); }
@@ -774,9 +866,6 @@ document.addEventListener("click", async e => {
     }
     case "mod-prop":
       if (await act(() => api("POST", `/api/mod/proposals/${d.id}`, { action: el.dataset.v }), el.dataset.v === "hide" ? "Proposition masquée." : "Proposition rétablie.")) rerender();
-      return;
-    case "mod-note":
-      if (await act(() => api("POST", `/api/mod/notes/${el.dataset.n}`, { action: el.dataset.v }), el.dataset.v === "remove" ? "Contribution retirée." : "Contribution rétablie.")) rerender();
       return;
     case "ban":
       if (await act(() => api("POST", `/api/admin/users/${el.dataset.u}`, { banned: el.dataset.v === "1" }), el.dataset.v === "1" ? "Compte suspendu." : "Compte rétabli.")) rerender();
@@ -846,6 +935,21 @@ document.addEventListener("submit", async e => {
     else if (kind === "password") { await api("PATCH", "/api/me", { currentPassword: $("#cp").value, newPassword: $("#cn").value }); f.reset(); toast("Mot de passe modifié."); }
     else if (kind === "delete") { await api("DELETE", "/api/me", { password: $("#dp").value }); await loadBoot(); toast("Compte supprimé."); go("#/"); }
     else if (kind === "usersearch") { go("#/admin?q=" + encodeURIComponent($("#us").value)); }
+    else if (kind === "report") {
+      const reason = f.querySelector("input[name=reason]:checked")?.value;
+      if (!reason) { box.innerHTML = errBox("", "Choisis un motif."); return; }
+      const r = await api("POST", "/api/reports", { type: f.dataset.type, id: f.dataset.id, reason, comment: $("#rp-comment").value });
+      closeModal();
+      toast(r.opened ? "Signalement envoyé : une affaire est ouverte et un jury citoyen va l'examiner." : "Signalement envoyé. Merci.");
+      await loadBoot(); await rerender();
+    }
+    else if (kind === "jury") {
+      const action = f.querySelector("input[name=action]:checked")?.value;
+      if (!action) { box.innerHTML = errBox("", "Choisis une mesure."); return; }
+      const r = await api("POST", `/api/cases/${d.id}/vote`, { action, comment: $("#j-comment").value });
+      toast(r.closed ? "Vote enregistré. Tous les jurés ont voté : l'affaire est close." : "Vote enregistré. Tu peux le modifier jusqu'à la clôture.");
+      await loadBoot(); await rerender();
+    }
     else if (kind === "note") {
       const text = $("#n-text").value.trim(), proposed = $("#n-proposed") ? $("#n-proposed").value.trim() : "";
       if (!local(text + "\n" + proposed)) return;
@@ -883,7 +987,10 @@ document.addEventListener("submit", async e => {
   finally { if (btn && document.contains(btn)) btn.disabled = false; }
 });
 
-window.addEventListener("hashchange", () => { UI.editing = false; UI.editingTags = false; UI.openVer = null; if (!location.hash.startsWith("#/proposer") && !location.hash.startsWith("#/variante")) UI.prefill = null; render(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && $("#modal-root").innerHTML) closeModal(); });
+window.addEventListener("hashchange", () => { closeModal(); UI.editing = false; UI.editingTags = false; UI.openVer = null; if (!location.hash.startsWith("#/proposer") && !location.hash.startsWith("#/variante")) UI.prefill = null;
+  // Rafraîchit le compte (notifications, jury, suspension) à chaque changement de page.
+  loadBoot().catch(() => {}).finally(() => render()); });
 
 (async () => {
   try { await loadBoot(); }
