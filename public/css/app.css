@@ -359,3 +359,24 @@ footer.site .wrap{display:flex;gap:8px 18px;flex-wrap:wrap;justify-content:space
 blockquote.quote{margin:0;padding:10px 14px;border-left:3px solid var(--accent);background:var(--paper);white-space:pre-wrap;overflow-wrap:anywhere}
 .journal li.unread span:last-child{font-weight:600}
 @media (max-width:640px){.reasons{grid-template-columns:1fr}}
+/* ---------- Objectif un million ---------- */
+.goal{display:grid;grid-template-columns:minmax(0,auto) minmax(0,1fr);gap:28px;align-items:center;margin:26px 0 0;padding:22px 24px;background:var(--ink);color:var(--paper);border-radius:var(--r)}
+.goal-kicker{font-family:var(--f-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--accent)}
+.goal-n{font-family:var(--f-display);font-weight:900;font-stretch:66%;font-size:clamp(46px,7vw,76px);line-height:.9;font-variant-numeric:tabular-nums}
+.goal-l{font-family:var(--f-display);font-weight:800;font-stretch:80%;font-size:20px;text-transform:uppercase}
+.goal-body p{margin:0 0 14px;max-width:62ch;font-size:15px}
+.goal-track{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
+.goal-seg{height:10px;background:color-mix(in srgb,var(--paper) 18%,transparent);border-radius:2px;overflow:hidden}
+.goal-seg span{display:block;height:100%;background:var(--accent);min-width:0}
+.goal-ticks{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin-top:4px;font-family:var(--f-mono);font-size:11px;text-align:right;color:color-mix(in srgb,var(--paper) 60%,transparent)}
+.goal-ticks .on{color:var(--paper)}
+.goal-meta{display:flex;gap:6px 16px;flex-wrap:wrap;font-size:13px;margin:12px 0 14px}
+.goal-meta .muted{color:color-mix(in srgb,var(--paper) 55%,transparent)}
+.goal .btn:not(.primary){background:transparent;color:var(--paper);border-color:color-mix(in srgb,var(--paper) 35%,transparent)}
+@media (max-width:760px){.goal{grid-template-columns:1fr;gap:14px}}
+/* ---------- Mentions légales ---------- */
+.legal{max-width:820px}
+.legal h3{font-family:var(--f-body);font-size:15px;font-weight:700;margin:16px 0 6px}
+.legal p{margin:0 0 10px;max-width:70ch}
+.consent{display:flex;gap:10px;align-items:flex-start;font-size:13px;line-height:1.5;padding:10px 12px;background:var(--sunk);border-radius:var(--r)}
+.consent input{accent-color:var(--accent);margin-top:3px;flex:none;width:16px;height:16px}

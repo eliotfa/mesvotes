@@ -122,6 +122,21 @@ cd /opt/mesvotes && sudo docker compose up -d
 | `SMTP_*`, `MAIL_FROM` | Envoi d'e-mails (confirmation d'adresse, mot de passe oublié). |
 | `INIT_*` | Règles de la Constitution fondatrice, lues une seule fois. |
 
+### Mentions légales
+
+La page « Mentions légales et confidentialité » est générée à partir de `.env`. Renseigne au minimum :
+
+```ini
+LEGAL_NAME=Eliot Faggianelli
+LEGAL_EMAIL=contact@mesvotes.fr        # adresse de contact réelle
+HOSTING_NAME=Nom de ton hébergeur VPS
+HOSTING_ADDRESS=Adresse de l'hébergeur
+HOSTING_PHONE=Téléphone de l'hébergeur
+HOSTING_LOCATION=France
+```
+
+Un particulier peut ne pas publier son adresse postale (`LEGAL_ADDRESS` facultatif) à condition d'indiquer l'hébergeur. Un bandeau rappelle aux administrateurs ce qui manque.
+
 ### E-mails
 
 Sans SMTP, l'inscription fonctionne directement (pas de confirmation d'adresse) et les liens sont écrits dans les journaux (`docker compose logs app`).

@@ -132,6 +132,7 @@ async function viewHome() {
       <div class="btnrow"><a class="btn ink" href="#/comment" style="text-decoration:none">Comprendre le parcours</a><a class="btn" href="#/constitution" style="text-decoration:none;color:inherit">Lire la Constitution</a></div>
     </div>
   </section>
+  ${goalHtml()}
   <div class="strip" role="group" aria-label="Filtrer par phase">
     ${PHASES.map((p, i) => `<button style="--c:${cvar(p.c)}" data-act="phasef" data-f="${p.id}" aria-pressed="${f.phase === p.id}">
       <span class="step">${i + 1}/5</span><span class="name">${p.name}</span><span class="dur">${durs[p.id]}</span><span class="count">${c[p.id] || 0}</span></button>`).join("")}
@@ -155,6 +156,24 @@ async function viewHome() {
   ${data.facets.tags.length ? `<div class="tagcloud"><span class="lbl">Tags</span>${data.facets.tags.slice(0, 16).map(([t, n]) => `<button class="tagbtn" data-act="tagf" data-t="${esc(t)}" aria-pressed="${f.tag === t}">#${esc(t)}<span class="c">${n}</span></button>`).join("")}</div>` : ""}` : ""}
   <div class="active-filters" id="active">${activeHtml(data)}</div>
   <div class="list" id="list">${listHtml(data.items)}</div>`;
+}
+function goalHtml() {
+  const goal = BOOT.goalMembers || 1000000, m = BOOT.stats.members || 0;
+  const steps = [0, 100, 1000, 10000, 100000, goal];
+  const fmtStep = v => v >= 1000000 ? `${n_(v / 1000000)} M` : fmtN(v);
+  const next = steps.find(v => v > m) || goal;
+  const pctGoal = m / goal * 100;
+  return `<section class="goal" aria-labelledby="goal-t">
+    <div class="goal-head"><div class="goal-kicker">Objectif</div><div class="goal-n" id="goal-t">${fmtN(goal)}</div><div class="goal-l">de membres</div></div>
+    <div class="goal-body">
+      <p>À un million de membres, nous fondons un parti politique ouvert à tous, dont le seul programme sera les propositions adoptées ici. Ses élus voteront ce que les membres auront décidé, rien d'autre.</p>
+      <div class="goal-track" role="img" aria-label="${fmtN(m)} membres sur ${fmtN(goal)}, prochaine étape ${fmtN(next)}">
+        ${steps.slice(1).map((v, i) => { const lo = steps[i]; const f = m >= v ? 100 : m <= lo ? 0 : (m - lo) / (v - lo) * 100; return `<div class="goal-seg"><span style="width:${f}%"></span></div>`; }).join("")}
+      </div>
+      <div class="goal-ticks">${steps.slice(1).map(v => `<span class="${m >= v ? "on" : ""}">${fmtStep(v)}</span>`).join("")}</div>
+      <div class="goal-meta"><span><strong class="mono">${fmtN(m)}</strong> membre${m > 1 ? "s" : ""}</span><span>prochaine étape : ${fmtN(next)}</span><span>${pctGoal < 0.1 ? "moins de 0,1" : n_(Math.round(pctGoal * 10) / 10)} % de l'objectif</span><span class="muted">échelle par paliers</span></div>
+      <div class="btnrow">${me() ? "" : `<a class="btn primary" href="#/inscription" style="text-decoration:none">Devenir membre</a>`}<button class="btn" data-act="share">Partager mesvotes.fr</button></div>
+    </div></section>`;
 }
 function activeFilters() {
   const f = UI.f, out = [];
@@ -581,10 +600,10 @@ function viewRegister() {
     <label class="f">E-mail<input type="email" id="r-email" required autocomplete="email" placeholder="prenom@exemple.fr"></label>
     <label class="f">Pseudo <small>3 à 20 caractères : lettres sans accent, chiffres, point, tiret, tiret bas.</small><input type="text" id="r-pseudo" required minlength="3" maxlength="20" pattern="[A-Za-z0-9._\\-]{3,20}" autocomplete="nickname"></label>
     <label class="f">Mot de passe <small>8 caractères minimum.</small><input type="password" id="r-pass" required minlength="8" autocomplete="new-password"></label>
-    <div class="f">Tu as…<div class="seg"><label><input type="radio" name="age" value="maj" checked> 18 ans ou plus</label><label><input type="radio" name="age" value="min"> Moins de 18 ans</label></div><small>Tout le monde vote. Ça sert seulement à afficher aussi les résultats par âge.</small></div>
+    <div class="f">Tu as…<div class="seg"><label><input type="radio" name="age" value="maj" checked> 18 ans ou plus</label><label><input type="radio" name="age" value="min"> Moins de 18 ans</label></div><small>Tout le monde vote. Ça sert seulement à afficher aussi les résultats par âge. Si tu as moins de 15 ans, inscris-toi avec l'accord d'un de tes parents.</small></div>
+    <label class="consent"><input type="checkbox" id="r-consent" required><span>J'accepte la <a href="#/constitution" target="_blank">Constitution</a> et sa charte du débat. Je consens à ce que mes propositions, parrainages et votes, qui peuvent révéler mes opinions politiques, soient traités pour faire fonctionner mesvotes (<a href="#/mentions-legales" target="_blank">confidentialité</a>). Je peux retirer ce consentement en supprimant mon compte.</span></label>
     <div class="form-msg"></div>
     <button class="btn primary" type="submit">Créer mon compte</button>
-    <p class="muted" style="margin:0;font-size:13px">En t'inscrivant, tu acceptes la <a href="#/constitution">Constitution</a> et sa charte du débat.</p>
   </form></div></div>`;
 }
 function viewReset(params) {
@@ -709,6 +728,62 @@ async function viewAdmin(params) {
   </tbody></table></div>`;
 }
 
+
+/* ---------- mentions légales et confidentialité ---------- */
+function viewLegal() {
+  VIEW = { name: "legal", data: null };
+  const L = BOOT.legal || {}, name = esc(L.name || "Eliot Faggianelli");
+  const mail = L.email || ("contact@" + (BOOT.baseUrl || location.origin).replace(/^https?:\/\//, "").replace(/[:/].*$/, ""));
+  const contact = `<a href="mailto:${esc(mail)}">${esc(mail)}</a>`;
+  const missing = !L.hostName || !L.email;
+  return `<div class="page-head"><h1>Mentions légales et confidentialité</h1><p>Qui édite mesvotes.fr, où sont tes données, ce qu'on en fait et comment exercer tes droits.</p></div>
+  ${missing && isAdmin() ? `<div class="notice warn">Administration : complète <code>LEGAL_EMAIL</code> et les variables <code>HOSTING_*</code> dans le fichier <code>.env</code> du serveur, puis redémarre (<code>docker compose up -d</code>). Ces informations sont obligatoires.</div>` : ""}
+  <div class="legal prose">
+    <section class="section"><h2>Éditeur du site</h2>
+      <p>mesvotes.fr est édité à titre personnel et non professionnel par <strong>${name}</strong>${L.address ? `, ${esc(L.address)}` : ""}.</p>
+      <p>Directeur de la publication : ${name}.</p>
+      <p>Contact : ${contact}.</p></section>
+    <section class="section"><h2>Hébergement</h2>
+      ${L.hostName ? `<p>Le site est hébergé par <strong>${esc(L.hostName)}</strong>${L.hostAddress ? `, ${esc(L.hostAddress)}` : ""}${L.hostPhone ? `, téléphone ${esc(L.hostPhone)}` : ""}.</p>` : `<p>Informations sur l'hébergeur en cours de mise à jour.</p>`}
+      ${L.hostLocation ? `<p>Les données sont stockées sur un serveur situé en ${esc(L.hostLocation)}.</p>` : ""}</section>
+    <section class="section"><h2>Nature du site</h2>
+      <p>mesvotes.fr est un projet citoyen indépendant. Il n'est affilié à aucun parti politique. Les votes organisés ici n'ont aucune valeur légale : ils expriment l'avis des membres de la plateforme.</p></section>
+    <section class="section"><h2>Contenus publiés et propriété intellectuelle</h2>
+      <p>Le code de mesvotes est un logiciel libre sous licence <a href="https://github.com/eliotfa/mesvotes" rel="noopener">GNU AGPL v3</a>.</p>
+      <p>Chaque membre est responsable de ce qu'il publie. En publiant une proposition ou une contribution, tu acceptes qu'elle soit affichée publiquement, amendée par d'autres membres, reprise sous forme de variante et conservée dans l'historique, sous licence <a href="https://creativecommons.org/licenses/by-sa/4.0/deed.fr" rel="noopener">Creative Commons BY-SA 4.0</a>.</p>
+      <p>Pour signaler un contenu, utilise le bouton « Signaler » : il est examiné par un jury citoyen (voir la <a href="#/moderation">modération</a>). Pour un contenu manifestement illégal, écris aussi à ${contact} en précisant l'adresse de la page et la raison.</p></section>
+    <section class="section"><h2>Tes données personnelles</h2>
+      <p><strong>Responsable du traitement :</strong> ${name}, joignable à ${contact}.</p>
+      <h3>Ce que nous enregistrons</h3>
+      <ul>
+        <li><strong>Ton e-mail</strong> : pour te connecter et te prévenir (jury, décisions). Il n'est jamais affiché.</li>
+        <li><strong>Ton pseudo</strong> : public, il signe tes propositions et contributions.</li>
+        <li><strong>Ta tranche d'âge</strong> (plus ou moins de 18 ans) : pour publier aussi les résultats des mineurs à part.</li>
+        <li><strong>Ton mot de passe</strong> : stocké uniquement sous forme chiffrée irréversible (scrypt). Personne ne peut le lire.</li>
+        <li><strong>Tes propositions, contributions et fichiers joints</strong> : publics.</li>
+        <li><strong>Tes parrainages et tes votes</strong> : jamais publiés un par un. Seuls les totaux sont affichés, et les résultats d'un vote seulement à sa clôture.</li>
+        <li><strong>Tes signalements et tes votes de juré</strong> : anonymes pour les autres membres.</li>
+        <li><strong>Ton adresse IP</strong> : utilisée quelques minutes en mémoire pour limiter les abus (tentatives de connexion répétées), sans être enregistrée en base. Le serveur web peut la conserver dans ses journaux techniques pendant une durée limitée.</li>
+      </ul>
+      <h3>Opinions politiques</h3>
+      <p>Tes propositions, parrainages et votes peuvent révéler tes opinions politiques, qui sont des données sensibles au sens de l'article 9 du RGPD. Elles ne sont traitées que sur la base de ton <strong>consentement explicite</strong>, donné à l'inscription. Tu peux le retirer à tout moment en supprimant ton compte.</p>
+      <h3>Pourquoi</h3>
+      <p>Uniquement pour faire fonctionner la plateforme : comptes, débats, votes, modération et sécurité. Pas de publicité, pas de revente, pas de profilage, aucune donnée transmise à un parti ou à un tiers.</p>
+      <h3>Qui y a accès</h3>
+      <p>L'éditeur et l'hébergeur du serveur${BOOT.mailEnabled ? ", ainsi que le prestataire d'envoi d'e-mails pour les messages qui te sont adressés" : ""}. Les polices de caractères sont chargées depuis Google Fonts, ce qui transmet ton adresse IP à Google lors de l'affichage du site.</p>
+      <h3>Combien de temps</h3>
+      <p>Tant que ton compte existe. Si tu le supprimes, ton e-mail et ton mot de passe sont effacés et ton pseudo est remplacé par « ancien-membre ». Tes contributions publiques et tes votes restent, anonymes, pour ne pas fausser l'historique des débats ni les résultats. Les sessions de connexion expirent au bout de 30 jours.</p>
+      <h3>Cookies</h3>
+      <p>Un seul cookie : celui qui te garde connecté. Il est strictement nécessaire au fonctionnement du site, c'est pourquoi aucun bandeau ne te demande ton accord. Aucun cookie de mesure d'audience ni de publicité.</p>
+      <h3>Mineurs</h3>
+      <p>Les mineurs peuvent participer. En France, une personne de moins de 15 ans doit avoir l'accord d'un de ses parents pour s'inscrire.</p>
+      <h3>Tes droits</h3>
+      <p>Tu peux accéder à tes données, les corriger, les exporter, t'opposer à leur traitement ou demander leur effacement. La suppression du compte est immédiate depuis la page <a href="#/compte">Mon compte</a>. Pour le reste, écris à ${contact}. Si tu estimes que tes droits ne sont pas respectés, tu peux saisir la <a href="https://www.cnil.fr/fr/plaintes" rel="noopener">CNIL</a>.</p>
+    </section>
+    <p class="muted" style="font-size:13px">Dernière mise à jour : octobre 2026.</p>
+  </div>`;
+}
+
 /* ---------- pages d'information ---------- */
 async function viewHow() {
   const j = await api("GET", "/api/journal"); VIEW = { name: "how", data: j };
@@ -788,6 +863,7 @@ async function render(scrollTop = true) {
       case "moderation": html = await viewMod(); break;
       case "affaire": html = await viewCase(parts[1]); break;
       case "u": html = await viewProfile(parts[1]); break;
+      case "mentions-legales": html = viewLegal(); break;
       case "admin": html = await viewAdmin(params); break;
       default: VIEW = { name: "404" }; html = `<div class="empty">Page introuvable. <a href="#/">Retour à l'accueil</a></div>`;
     }
@@ -871,6 +947,12 @@ document.addEventListener("click", async e => {
       if (await act(() => api("POST", `/api/admin/users/${el.dataset.u}`, { banned: el.dataset.v === "1" }), el.dataset.v === "1" ? "Compte suspendu." : "Compte rétabli.")) rerender();
       return;
     case "resend": await act(() => api("POST", "/api/auth/resend"), "Lien de confirmation renvoyé."); return;
+    case "share": {
+      const url = BOOT.baseUrl || location.origin;
+      try { await navigator.clipboard.writeText(url); toast("Lien copié : " + url); }
+      catch { toast("Copie ce lien : " + url); }
+      return;
+    }
     case "logout": await act(() => api("POST", "/api/auth/logout")); await loadBoot(); toast("Déconnecté."); return go("#/");
   }
 });
@@ -925,7 +1007,7 @@ document.addEventListener("submit", async e => {
       const back = UI.after && !/connexion|inscription/.test(UI.after) ? UI.after : "#/"; UI.after = "#/"; go(back);
     }
     else if (kind === "register") {
-      await api("POST", "/api/auth/register", { email: $("#r-email").value, pseudo: $("#r-pseudo").value, password: $("#r-pass").value, minor: f.querySelector("input[name=age]:checked").value === "min" });
+      await api("POST", "/api/auth/register", { email: $("#r-email").value, pseudo: $("#r-pseudo").value, password: $("#r-pass").value, minor: f.querySelector("input[name=age]:checked").value === "min", consent: $("#r-consent").checked });
       await loadBoot();
       toast(BOOT.mailEnabled ? "Compte créé. Confirme ton adresse avec le lien reçu par e-mail." : `Bienvenue @${me().pseudo} !`);
       const back = UI.after && !/connexion|inscription/.test(UI.after) ? UI.after : "#/"; UI.after = "#/"; go(back);

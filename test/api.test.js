@@ -49,13 +49,15 @@ const admin = client(), ana = client(), bob = client(), cleo = client();
 
 test("inscriptions : le premier compte est administrateur", async () => {
   resetRateLimits();
-  const a = ok(await admin.post("/api/auth/register", { email: "admin@test.fr", pseudo: "admin", password: "motdepasse1" }));
+  const a = ok(await admin.post("/api/auth/register", { email: "admin@test.fr", pseudo: "admin", password: "motdepasse1", consent: true }));
   assert.equal(a.me.role, "admin");
-  ok(await ana.post("/api/auth/register", { email: "ana@test.fr", pseudo: "ana", password: "motdepasse1" }));
-  ok(await bob.post("/api/auth/register", { email: "bob@test.fr", pseudo: "bob", password: "motdepasse1", minor: true }));
-  const c = ok(await cleo.post("/api/auth/register", { email: "cleo@test.fr", pseudo: "cleo", password: "motdepasse1" }));
+  ok(await ana.post("/api/auth/register", { email: "ana@test.fr", pseudo: "ana", password: "motdepasse1", consent: true }));
+  ok(await bob.post("/api/auth/register", { email: "bob@test.fr", pseudo: "bob", password: "motdepasse1", consent: true, minor: true }));
+  const c = ok(await cleo.post("/api/auth/register", { email: "cleo@test.fr", pseudo: "cleo", password: "motdepasse1", consent: true }));
   assert.equal(c.me.role, "user");
-  assert.equal((await client().post("/api/auth/register", { email: "x@test.fr", pseudo: "ana", password: "motdepasse1" })).status, 409);
+  assert.equal((await client().post("/api/auth/register", { email: "x@test.fr", pseudo: "ana", password: "motdepasse1", consent: true })).status, 409);
+  resetRateLimits();
+  assert.equal((await client().post("/api/auth/register", { email: "y@test.fr", pseudo: "sansaccord", password: "motdepasse1" })).status, 400, "consentement obligatoire");
   assert.equal((await client().post("/api/auth/login", { email: "ana@test.fr", password: "mauvais" })).status, 401);
   assert.equal(ok(await admin.get("/api/bootstrap")).electorate, 4);
 });
@@ -168,7 +170,7 @@ test("modération citoyenne : jury tiré au sort, mesure médiane, suspension, a
   resetRateLimits();
   for (let i = 1; i <= 8; i++) {
     if (i === 5) resetRateLimits();
-    const c = client(); ok(await c.post("/api/auth/register", { email: `j${i}@test.fr`, pseudo: `jure${i}`, password: "motdepasse1" })); jurors.push(c);
+    const c = client(); ok(await c.post("/api/auth/register", { email: `j${i}@test.fr`, pseudo: `jure${i}`, password: "motdepasse1", consent: true })); jurors.push(c);
   }
   const r = ok(await ana.post("/api/proposals", { kind: "loi", title: "Sujet de débat animé", summary: "Une proposition pour tester la modération.", text: "Texte de test pour la modération.", projetDays: 30, delibDays: 180 }));
   const n = ok(await bob.post(`/api/proposals/${r.id}/notes`, { type: "comment", text: "Une remarque franchement désagréable." }));
@@ -275,7 +277,7 @@ test("mode démo : l'admin peut accélérer, pas les autres", async () => {
 test("compte : changement de mot de passe et suppression", async () => {
   resetRateLimits();
   const z = client();
-  ok(await z.post("/api/auth/register", { email: "zoe@test.fr", pseudo: "zoe", password: "motdepasse1" }));
+  ok(await z.post("/api/auth/register", { email: "zoe@test.fr", pseudo: "zoe", password: "motdepasse1", consent: true }));
   assert.equal((await z.patch("/api/me", { currentPassword: "faux", newPassword: "nouveau123" })).status, 401);
   ok(await z.patch("/api/me", { currentPassword: "motdepasse1", newPassword: "nouveau123" }));
   ok(await z.del("/api/me", { password: "nouveau123" }));

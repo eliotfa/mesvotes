@@ -66,7 +66,9 @@ route("GET", "/api/bootstrap", (req) => {
   const counts = q("SELECT SUM(phase='vote') votes, COUNT(*) total FROM proposals WHERE hidden=0").get();
   return {
     me: meView(u), constitution: cstAll(), electorate: electorate(), demoMode: config.demoMode, mailEnabled: config.mailEnabled,
-    stats: { proposals: counts.total || 0, votesOpen: counts.votes || 0, lawsInForce: q("SELECT COUNT(*) c FROM laws WHERE status='vigueur'").get().c }
+    stats: { proposals: counts.total || 0, votesOpen: counts.votes || 0, lawsInForce: q("SELECT COUNT(*) c FROM laws WHERE status='vigueur'").get().c,
+      members: q("SELECT COUNT(*) c FROM users WHERE pass_hash IS NOT NULL AND banned=0").get().c },
+    goalMembers: config.goalMembers, legal: config.legal, baseUrl: config.baseUrl
   };
 });
 
@@ -80,6 +82,7 @@ route("POST", "/api/auth/register", async (req, res) => {
   const r = moderate(pseudo, { allowCaps: true }); if (r) fail(422, "Ce pseudo n'est pas acceptable. Choisis-en un autre.");
   const password = String(b.password || "");
   if (password.length < 8) fail(400, "Le mot de passe doit faire au moins 8 caractères.");
+  if (b.consent !== true) fail(400, "Pour t'inscrire, coche la case d'acceptation de la Constitution et du traitement de tes données.");
   if (q("SELECT 1 x FROM users WHERE email=?").get(email)) fail(409, "Un compte existe déjà avec cet e-mail. Connecte-toi.");
   if (q("SELECT 1 x FROM users WHERE pseudo_lc=?").get(pseudo.toLowerCase())) fail(409, "Ce pseudo est déjà pris.");
   const first = !q("SELECT 1 x FROM users WHERE pass_hash IS NOT NULL LIMIT 1").get();

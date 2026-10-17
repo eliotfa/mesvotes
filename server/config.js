@@ -28,6 +28,16 @@ export const config = {
   maxUploadBytes: Number(env.MAX_UPLOAD_MB || 10) * 1024 * 1024,
   tickSeconds: Number(env.TICK_SECONDS || 60),
   initialParams,
+  goalMembers: Number(env.GOAL_MEMBERS || 1000000),
+  legal: {
+    name: env.LEGAL_NAME || "Eliot Faggianelli",
+    email: env.LEGAL_EMAIL || "",
+    address: env.LEGAL_ADDRESS || "",
+    hostName: env.HOSTING_NAME || "",
+    hostAddress: env.HOSTING_ADDRESS || "",
+    hostPhone: env.HOSTING_PHONE || "",
+    hostLocation: env.HOSTING_LOCATION || ""
+  },
   smtp: {
     host: env.SMTP_HOST || "",
     port: Number(env.SMTP_PORT || 587),
