@@ -9,6 +9,7 @@ import {
   createToken, consumeToken
 } from "./auth.js";
 import { sendMail, maskEmail } from "./mail.js";
+import { renderMail } from "./mail-template.js";
 import {
   now, uid, isMod, isAdmin, journal, cstNow, cstAll, electorate, getProposal, proposalDetail, proposalSummaries,
   lawFull, lawsAll, lastVersion, versionsOf
@@ -55,8 +56,11 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /* ---------- comptes ---------- */
 async function sendVerification(u) {
   const t = createToken(u.id, "verify", 48);
-  await sendMail({ to: u.email, subject: "Confirme ton inscription sur mesvotes", text:
-    `Bonjour ${u.pseudo},\n\nPour confirmer ton adresse et pouvoir proposer, parrainer et voter, ouvre ce lien :\n${config.baseUrl}/api/auth/verify?t=${t}\n\nLe lien est valable 48 heures. Si tu n'es pas à l'origine de cette inscription, ignore ce message.\n\nmesvotes.fr` });
+  await sendMail({ to: u.email, subject: "Confirme ton inscription sur mesvotes", ...renderMail({
+    pseudo: u.pseudo, title: "Confirme ton adresse e-mail", preheader: "Plus qu'une étape pour proposer, parrainer et voter.",
+    paragraphs: ["Bienvenue sur mesvotes ! Pour confirmer ton adresse et pouvoir proposer, parrainer et voter, valide ton inscription."],
+    button: { label: "Confirmer mon adresse", url: `${config.baseUrl}/api/auth/verify?t=${t}` },
+    note: "Le lien est valable 48 heures. Si tu n'es pas à l'origine de cette inscription, ignore ce message." }) });
 }
 
 const routes = [];
@@ -139,7 +143,11 @@ route("POST", "/api/auth/forgot", async (req) => {
   if (u && !u.banned) {
     const t = createToken(u.id, "reset", 2);
     // L'échec d'envoi est déjà journalisé par sendMail ; la réponse reste identique pour ne pas révéler les comptes.
-    sendMail({ to: u.email, subject: "Nouveau mot de passe mesvotes", text: `Bonjour ${u.pseudo},\n\nPour choisir un nouveau mot de passe, ouvre ce lien (valable 2 heures) :\n${config.baseUrl}/#/reinitialiser?t=${t}\n\nSi tu n'as rien demandé, ignore ce message.\n\nmesvotes.fr` }).catch(() => {});
+    sendMail({ to: u.email, subject: "Nouveau mot de passe mesvotes", ...renderMail({
+      pseudo: u.pseudo, title: "Choisis un nouveau mot de passe", preheader: "Le lien est valable 2 heures.",
+      paragraphs: ["Tu as demandé à changer le mot de passe de ton compte mesvotes."],
+      button: { label: "Choisir un nouveau mot de passe", url: `${config.baseUrl}/#/reinitialiser?t=${t}` },
+      note: "Le lien est valable 2 heures. Si tu n'as rien demandé, ignore ce message : ton mot de passe actuel reste valable." }) }).catch(() => {});
   } else {
     console.log(`[mail] mot de passe oublié sans envoi pour ${maskEmail(String(b.email || "").trim())} : ${u ? "compte banni" : "aucun compte à cette adresse"}`);
   }

@@ -9,6 +9,7 @@ import { mergedCst, relativeToBase, validateCst } from "../public/shared/constit
 import { moderate } from "../public/shared/moderation.js";
 import { verify as verifyAntibot } from "../server/antibot.js";
 import { DEFAULT_PARAMS, DEFAULT_FREE } from "../public/shared/constitution.js";
+import { renderMail } from "../server/mail-template.js";
 
 const req = (xff, ip = "10.0.0.2") => ({ headers: xff === undefined ? {} : { "x-forwarded-for": xff }, socket: { remoteAddress: ip } });
 
@@ -74,4 +75,13 @@ test("filtre de modération : retient insultes, menaces et données personnelles
 test("anti-robot : un champ piège rempli ou une preuve absente sont refusés", () => {
   assert.throws(() => verifyAntibot({ nepasremplir: "http://spam" }), /anti-robot/);
   assert.throws(() => verifyAntibot({}), /anti-robot/);
+});
+
+test("e-mails : le HTML échappe le contenu, le texte brut garde le lien en clair", () => {
+  const { text, html } = renderMail({ pseudo: "ana", title: "Titre", paragraphs: ["<script>alert(1)</script> & co"],
+    button: { label: "Ouvrir", url: "https://exemple.fr/?a=1&b=2" }, note: "Note." });
+  assert.ok(!html.includes("<script>"));
+  assert.ok(html.includes("&lt;script&gt;alert(1)&lt;/script&gt; &amp; co"));
+  assert.ok(html.includes('href="https://exemple.fr/?a=1&amp;b=2"'));
+  assert.match(text, /^Bonjour ana,\n\n<script>alert\(1\)<\/script> & co\n\nOuvrir :\nhttps:\/\/exemple\.fr\/\?a=1&b=2\n\nNote\./);
 });

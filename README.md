@@ -220,6 +220,7 @@ mesvotes/
 │   ├── auth.js             Mots de passe (scrypt), sessions, jetons
 │   ├── antibot.js          Preuve de travail, délai minimum, champ piège
 │   ├── mail.js             Client SMTP minimal
+│   ├── mail-template.js    Mise en forme des e-mails (HTML + texte)
 │   ├── seed.js             Données d'exemple
 │   └── config.js           Variables d'environnement
 ├── public/                 Interface web (HTML, CSS, JavaScript sans framework)

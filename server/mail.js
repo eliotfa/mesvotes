@@ -1,4 +1,5 @@
 // Envoi d'e-mails par SMTP, sans dépendance (STARTTLS sur 587 ou TLS direct sur 465).
+// Un message peut avoir une version HTML (voir mail-template.js) en plus du texte brut.
 // Sans SMTP_HOST, les e-mails sont simplement écrits dans les journaux du serveur.
 // Chaque envoi est journalisé : succès avec la réponse finale du serveur, échec avec l'étape SMTP en cause.
 import net from "node:net";
@@ -30,8 +31,21 @@ function reader(socket) {
   };
 }
 
+// Corps du message : texte seul, ou texte + HTML en multipart/alternative (le client affiche le HTML s'il le sait).
+const b64Body = s => b64(s).replace(/.{1,76}/g, "$&\r\n");
+function mimeBody(text, html) {
+  if (!html) return ["Content-Type: text/plain; charset=utf-8", "Content-Transfer-Encoding: base64", "", b64Body(text)];
+  const boundary = "=_mesvotes_" + crypto.randomUUID();
+  return [
+    `Content-Type: multipart/alternative; boundary="${boundary}"`, "",
+    `--${boundary}`, "Content-Type: text/plain; charset=utf-8", "Content-Transfer-Encoding: base64", "", b64Body(text),
+    `--${boundary}`, "Content-Type: text/html; charset=utf-8", "Content-Transfer-Encoding: base64", "", b64Body(html),
+    `--${boundary}--`
+  ];
+}
+
 // Renvoie la dernière réponse du serveur (ex. « 250 2.0.0 OK »). En cas d'erreur, e.step indique l'étape en cause.
-async function smtpSend({ to, subject, text }) {
+async function smtpSend({ to, subject, text, html }) {
   const { host, port, secure, user, pass, from } = config.smtp;
   let step = "connexion", socket;
   try {
@@ -72,8 +86,7 @@ async function smtpSend({ to, subject, text }) {
     const msg = [
       `From: ${from}`, `To: ${to}`, `Subject: ${encodeHeader(subject)}`, `Date: ${new Date().toUTCString()}`,
       `Message-ID: <${crypto.randomUUID()}@${addr(from).split("@")[1] || "mesvotes.fr"}>`,
-      "MIME-Version: 1.0", "Content-Type: text/plain; charset=utf-8", "Content-Transfer-Encoding: base64", "",
-      b64(text).replace(/.{1,76}/g, "$&\r\n")
+      "MIME-Version: 1.0", ...mimeBody(text, html)
     ].join("\r\n");
     await cmd(msg + "\r\n.", 250);
     const reply = last;

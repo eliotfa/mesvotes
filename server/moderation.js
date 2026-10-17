@@ -5,6 +5,7 @@ import { config } from "./config.js";
 import { fail } from "./http.js";
 import { revokeSessions } from "./auth.js";
 import { sendMail } from "./mail.js";
+import { renderMail } from "./mail-template.js";
 import { now, uid, cstNow, journal, isAdmin, lastVersion, deletionState } from "./model.js";
 import { MOD_ACTIONS, actionsFor, REPORT_REASONS } from "../public/shared/constitution.js";
 
@@ -22,7 +23,9 @@ export function notify(userId, text, link = null, mail = false) {
   q("INSERT INTO notifications(user_id,date,text,link,read) VALUES (?,?,?,?,0)").run(userId, now(), text, link);
   if (mail && config.mailEnabled) {
     const u = q("SELECT email, pseudo FROM users WHERE id=? AND pass_hash IS NOT NULL").get(userId);
-    if (u) sendMail({ to: u.email, subject: "mesvotes : " + text.slice(0, 70), text: `Bonjour ${u.pseudo},\n\n${text}\n\n${config.baseUrl}/${link || ""}\n\nmesvotes.fr` }).catch(() => {});
+    if (u) sendMail({ to: u.email, subject: "mesvotes : " + text.slice(0, 70), ...renderMail({
+      pseudo: u.pseudo, title: "Nouvelle notification", preheader: text, paragraphs: [text],
+      button: { label: link ? "Voir le détail" : "Ouvrir mesvotes", url: `${config.baseUrl}/${link || ""}` } }) }).catch(() => {});
   }
 }
 
