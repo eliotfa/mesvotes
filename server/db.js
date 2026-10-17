@@ -218,6 +218,16 @@ const MIGRATIONS = [
   CREATE INDEX uploads_user ON uploads(user_id);
   CREATE INDEX sanctions_user ON sanctions(user_id, revoked);
   CREATE INDEX parrainages_user ON parrainages(user_id);
+  `,
+  // v4 : suppression définitive d'un contenu masqué, décidée par un vote de la communauté
+  `
+  CREATE TABLE deletion_votes(
+    target_type TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    date INTEGER NOT NULL,
+    PRIMARY KEY(target_type, target_id, user_id)
+  );
   `
 ];
 

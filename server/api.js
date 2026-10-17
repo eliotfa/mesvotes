@@ -14,7 +14,7 @@ import {
   lawFull, lawsAll, lastVersion, versionsOf
 } from "./model.js";
 import { settle, forceAdvance } from "./lifecycle.js";
-import { flag, castVote, appeal, moderationOverview, caseDetail, urgentRemove } from "./moderation.js";
+import { flag, castVote, appeal, moderationOverview, caseDetail, urgentRemove, voteDeletion, clearDeletionVotes } from "./moderation.js";
 import { challenge, verify as verifyAntibot } from "./antibot.js";
 import { moderate } from "../public/shared/moderation.js";
 import { sanitizeCst, validateCst, constDiffs, relativeToBase, mergedCst } from "../public/shared/constitution.js";
@@ -341,6 +341,11 @@ route("POST", "/api/reports", async (req) => {
   rateLimit("report:" + u.id, 20, 3600e3, "Tu as fait beaucoup de signalements en peu de temps. Réessaie plus tard.");
   return flag(u, String(b.type || ""), String(b.id || ""), String(b.reason || ""), b.comment);
 });
+route("POST", "/api/deletions/:type/:id", async (req, res, { params }) => {
+  const u = requireActive(req), b = await readJson(req);
+  rateLimit("deletion:" + u.id, 60, 3600e3, "Tu as fait beaucoup de votes en peu de temps. Réessaie plus tard.");
+  return voteDeletion(u, params.type, params.id, b.on !== false);
+});
 route("GET", "/api/moderation", (req) => moderationOverview(currentUser(req)));
 route("GET", "/api/cases/:id", (req, res, { params }) => caseDetail(currentUser(req), params.id));
 route("POST", "/api/cases/:id/vote", async (req, res, { params }) => {
@@ -482,6 +487,7 @@ route("POST", "/api/mod/proposals/:id", async (req, res, { params }) => {
   const p = getProposal(params.id); if (!p) fail(404, "Proposition introuvable.");
   const hide = b.action === "hide";
   q("UPDATE proposals SET hidden=? WHERE id=?").run(hide ? 1 : 0, p.id);
+  if (!hide) clearDeletionVotes("proposal", p.id);
   journal(hide ? `Intervention d'urgence de l'administration : proposition « ${p.title.slice(0, 50)} » masquée` : `Proposition « ${p.title.slice(0, 50)} » rétablie par l'administration`);
   return { ok: true };
 });

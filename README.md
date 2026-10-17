@@ -53,6 +53,7 @@ Les phases avancent toutes seules : une horloge interne vérifie les échéances
 - Le jury a **72 heures**. Si moins de la moitié a voté, des remplaçants sont tirés une fois ; ensuite, **le doute profite à l'auteur**.
 - La personne sanctionnée peut **faire appel une fois**, devant un jury de 15 inscrits qui n'a jamais vu l'affaire.
 - Toutes les décisions sont publiques (sans le contenu) sur la page Modération et dans le journal.
+- **Suppression définitive** : masquer peut se faire seul, en urgence. Supprimer, non : un contenu masqué ne disparaît que si 5 inscrits votent pour sa suppression (règle `modDelVotes`, réglable par révision). L'auteur ne vote pas, et aucun vote n'a lieu pendant l'examen d'un jury. Une proposition adoptée, qui alimente le recueil des lois, ne peut pas être supprimée.
 - Ces chiffres sont des règles de la Constitution : ils se changent par une révision votée.
 - Un filtre automatique bloque d'emblée insultes, propos haineux, menaces, e-mails et téléphones. L'administration garde un droit d'**intervention d'urgence** pour les contenus manifestement illégaux, toujours inscrit au journal.
 

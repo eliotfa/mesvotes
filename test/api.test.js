@@ -263,6 +263,46 @@ test("modération : signaler un compte", async () => {
   assert.equal(prof.pseudo, "bob");
 });
 
+test("suppression : un contenu masqué disparaît définitivement après N votes, pas avant", async () => {
+  // Seuil par défaut : 5 votes. Auteur exclu, pas de vote sur un contenu visible.
+  const r = ok(await bob.post("/api/proposals", { kind: "loi", title: "Proposition à retirer", summary: "Une proposition masquée en urgence.", text: "Texte de la proposition à retirer.", projetDays: 30, delibDays: 180 }));
+  const n = ok(await ana.post(`/api/proposals/${r.id}/notes`, { type: "comment", text: "Une contribution masquée en urgence." }));
+  assert.equal((await ana.post(`/api/deletions/note/${n.id}`, { on: true })).status, 409, "un contenu visible ne se vote pas pour la suppression");
+  ok(await admin.post("/api/mod/urgent", { type: "note", id: n.id }));
+  assert.equal((await ana.post(`/api/deletions/note/${n.id}`, { on: true })).status, 400, "on ne vote pas sur son propre contenu");
+  const first = ok(await bob.post(`/api/deletions/note/${n.id}`, { on: true }));
+  assert.deepEqual([first.deleted, first.votes], [false, 1]);
+  assert.equal(ok(await bob.post(`/api/deletions/note/${n.id}`, { on: true })).votes, 1, "un seul vote par personne");
+  const listed = ok(await cleo.get("/api/moderation")).masked.find(x => x.id === n.id);
+  assert.ok(listed && listed.removed && listed.own === false && listed.mine === false && listed.votes === 1, "le contenu masqué est listé pour le vote");
+  assert.equal(listed.author, undefined, "la liste ne révèle pas l'auteur");
+  assert.equal(ok(await bob.post(`/api/deletions/note/${n.id}`, { on: false })).votes, 0, "on peut retirer son vote");
+  for (const c of [bob, cleo, jurors[0], jurors[1]]) ok(await c.post(`/api/deletions/note/${n.id}`, { on: true }));
+  assert.equal(ok(await cleo.get(`/api/proposals/${r.id}`)).notes.some(x => x.id === n.id), true, "quatre votes ne suffisent pas");
+  const last = ok(await jurors[2].post(`/api/deletions/note/${n.id}`, { on: true }));
+  assert.equal(last.deleted, true);
+  assert.equal(ok(await cleo.get(`/api/proposals/${r.id}`)).notes.some(x => x.id === n.id), false, "la contribution est supprimée");
+  assert.ok(ok(await cleo.get("/api/journal")).items.some(x => /supprimé définitivement/.test(x.text)));
+
+  // Proposition masquée : le public la voit sans texte et peut voter ; la suppression efface tout.
+  const p = ok(await bob.post("/api/proposals", { kind: "loi", title: "Titre à effacer", summary: "Résumé à effacer.", text: "Texte à effacer.", projetDays: 30, delibDays: 180 }));
+  ok(await admin.post(`/api/mod/proposals/${p.id}`, { action: "hide" }));
+  const masked = ok(await ana.get(`/api/proposals/${p.id}`));
+  assert.equal(masked.masked, true);
+  assert.equal(masked.title, undefined, "le public ne voit pas le titre");
+  // Quatre votes : encore là. Le rétablissement efface les votes.
+  for (const c of [ana, cleo, jurors[0], jurors[1]]) ok(await c.post(`/api/deletions/proposal/${p.id}`, { on: true }));
+  assert.equal(ok(await ana.get(`/api/proposals/${p.id}`)).deletion.votes, 4);
+  ok(await admin.post(`/api/mod/proposals/${p.id}`, { action: "restore" }));
+  assert.equal(ok(await ana.get(`/api/proposals/${p.id}`)).deletion, undefined, "rétablie : plus de vote à afficher");
+  ok(await admin.post(`/api/mod/proposals/${p.id}`, { action: "hide" }));
+  assert.equal(ok(await ana.get(`/api/proposals/${p.id}`)).deletion.votes, 0, "les anciens votes ne comptent plus");
+  // Cinq votes frais : la proposition disparaît, les liens vers elle aussi.
+  for (const c of [ana, cleo, jurors[0], jurors[1], jurors[2]]) ok(await c.post(`/api/deletions/proposal/${p.id}`, { on: true }));
+  assert.equal((await ana.get(`/api/proposals/${p.id}`)).status, 404);
+  assert.equal(ok(await cleo.get("/api/moderation")).masked.some(x => x.id === p.id), false);
+});
+
 test("filtres et recherche", async () => {
   const all = ok(await ana.get("/api/proposals"));
   assert.ok(all.total >= 6);

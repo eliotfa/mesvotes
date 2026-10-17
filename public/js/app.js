@@ -244,7 +244,23 @@ async function viewDetail(id) {
   VIEW = { name: "detail", data: d };
   return detailHtml(d);
 }
+/** Bouton de vote pour la suppression définitive d'un contenu masqué. */
+function delVoteBtn(type, id, s, own) {
+  if (!me()) return "";
+  if (own) return `<span class="muted" style="font-size:13px">Ton contenu : tu ne peux pas voter dessus.</span>`;
+  return `<button class="btn small ghost" data-act="del-vote" data-type="${type}" data-id="${esc(id)}" data-on="${s.mine ? 0 : 1}" aria-pressed="${s.mine}">${s.mine ? "✓ Pour la suppression · retirer" : "Voter pour la supprimer"} · ${s.votes}/${s.threshold}</button>`;
+}
+function maskedHtml(d) {
+  return `
+  <a class="btn ghost small back" href="#/" style="text-decoration:none">← Toutes les propositions</a>
+  <div class="notice warn">Cette proposition a été masquée par décision d'un jury citoyen ou de l'administration. Son contenu n'est plus visible du public.</div>
+  <div class="section"><h2>Supprimer définitivement ?</h2>
+    <p class="muted" style="margin:0 0 10px;font-size:13px">Un contenu masqué disparaît définitivement dès ${d.deletion.threshold} inscrits votent pour sa suppression. Son auteur ne vote pas.</p>
+    ${me() ? delVoteBtn("proposal", d.id, d.deletion, d.isAuthor) : `<a class="btn small" href="#/connexion" style="text-decoration:none">Se connecter pour voter</a>`}
+  </div>`;
+}
 function detailHtml(d) {
+  if (d.masked) return maskedHtml(d);
   const tagEdit = UI.editingTags && d.isAuthor;
   return `
   <a class="btn ghost small back" href="#/" style="text-decoration:none">← Toutes les propositions</a>
@@ -360,6 +376,7 @@ function noteHtml(d, n) {
     <div class="note-actions">
       ${n.type === "amend" && n.status === "pending" && d.phase === "projet" && d.isAuthor ? `<button class="btn small" data-act="decide" data-n="${n.id}" data-v="accept">Intégrer au texte</button><button class="btn small ghost" data-act="decide" data-n="${n.id}" data-v="refuse">Ne pas retenir</button>` : ""}
       ${canReport ? `<button class="btn small ghost" data-act="report" data-type="note" data-id="${n.id}" ${n.myReport ? "disabled" : ""}>${n.myReport ? "Signalé" : "Signaler"}</button>` : ""}
+      ${n.deletion && !n.underReview ? delVoteBtn("note", n.id, n.deletion, n.mine) : ""}
     </div></div></article>`;
 }
 function timelineHtml(d) {
@@ -666,6 +683,9 @@ async function viewMod() {
       <div class="meta"><strong style="color:var(--ink)">${TYPE_LABEL[c.targetType]} de ${userLink(c.snapshot.author)}</strong><span>· affaire <a href="#/affaire/${c.id}">${esc(c.short)}</a></span><span>· ${c.votes}/${c.jurySize} votes</span><span>· échéance ${fmtD(c.deadline)}</span></div>
       <blockquote>${esc(c.snapshot.title || c.snapshot.text || ("Compte @" + c.snapshot.author))}</blockquote>
       ${c.targetType !== "user" ? `<div class="btnrow"><button class="btn small" data-act="urgent" data-type="${c.targetType}" data-id="${esc(c.targetId)}">Retirer en urgence (contenu illégal)</button></div>` : ""}</div>`).join("") || `<p class="muted" style="margin:0">Aucune.</p>`}</div>` : ""}
+  <div class="section"><h2>Contenus masqués · ${data.masked.length}</h2>
+    <p class="muted" style="margin:0 0 10px;font-size:13px">Masquer peut se faire seul, en urgence. Supprimer définitivement, non : un contenu masqué disparaît seulement quand ${r.modDelVotes} inscrits votent pour sa suppression. Pas pendant l'examen d'un jury, et l'auteur ne vote pas.</p>
+    ${data.masked.length ? `<ul class="mini">${data.masked.map(m => `<li><div class="row"><span class="t">${esc(m.label)} <span class="muted">· ${m.removed ? "retiré" : "masqué"} le ${fmtD(m.date)}</span></span>${delVoteBtn(m.type, m.id, m, m.own)}</div></li>`).join("")}</ul>` : `<p class="muted" style="margin:0">Aucun contenu masqué en attente.</p>`}</div>
   <div class="section"><h2>Décisions récentes · ${data.closed.length}</h2>${data.closed.length ? `<div class="tablewrap"><table class="admin-table"><thead><tr><th>Date</th><th>Affaire</th><th>Motif principal</th><th>Décision</th><th>Votes</th></tr></thead><tbody>
     ${data.closed.map(c => `<tr><td class="mono">${fmtDs(c.closedAt)}</td><td><a href="#/affaire/${c.id}">${TYPE_LABEL[c.targetType]} · ${esc(c.short)}</a>${c.round === 2 ? " (appel)" : ""}</td><td>${c.reasons[0] ? esc(REASON_LABEL[c.reasons[0][0]]) : "—"}</td><td>${esc(actionLabel(c.targetType, c.decision))}${c.note ? ` <span class="muted">· ${esc(c.note)}</span>` : ""}</td><td class="mono">${c.votes}/${c.jurySize}</td></tr>`).join("")}
   </tbody></table></div>` : `<p class="muted" style="margin:0">Aucune décision pour l'instant.</p>`}</div>`;
@@ -939,6 +959,16 @@ document.addEventListener("click", async e => {
       openReport(el.dataset.type, el.dataset.id); return;
     case "close-modal": if (e.target === el) closeModal(); return;
     case "close-modal-btn": closeModal(); return;
+    case "del-vote": {
+      if (!me()) { UI.after = location.hash; return go("#/connexion"); }
+      const type = el.dataset.type, on = el.dataset.on === "1";
+      const r = await act(() => api("POST", `/api/deletions/${type}/${el.dataset.id}`, { on }));
+      if (!r) return;
+      if (r.deleted) { toast("Supprimé définitivement par un vote des inscrits."); return type === "proposal" ? go("#/") : rerender(); }
+      toast(on ? "Ton vote pour la suppression est compté." : "Vote retiré.");
+      rerender();
+      return;
+    }
     case "urgent":
       if (!el.dataset.confirm) { el.dataset.confirm = "1"; el.textContent = "Confirmer le retrait ?"; return; }
       if (await act(() => api("POST", "/api/mod/urgent", { type: el.dataset.type, id: el.dataset.id }), "Retiré. L'intervention est inscrite au journal public.")) rerender();
