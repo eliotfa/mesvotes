@@ -55,7 +55,7 @@ C'est en ligne sur `https://mesvotes.fr`.
 ## Apache
 
 ```bash
-sudo a2enmod proxy proxy_http headers
+sudo a2enmod proxy proxy_http headers ssl
 ```
 
 Crée `/etc/apache2/sites-available/mesvotes.fr.conf` :
@@ -63,19 +63,27 @@ Crée `/etc/apache2/sites-available/mesvotes.fr.conf` :
 ```apache
 <VirtualHost *:80>
     ServerName mesvotes.fr
+
     ProxyPreserveHost On
+    ProxyRequests Off
+    # Ignore l'adresse envoyée par le visiteur : Apache ajoute la vraie juste après.
+    RequestHeader unset X-Forwarded-For early
+    LimitRequestBody 12582912
+
     ProxyPass        / http://127.0.0.1:3010/
     ProxyPassReverse / http://127.0.0.1:3010/
-    RequestHeader set X-Forwarded-Proto "http"
-    LimitRequestBody 12582912
+
+    ErrorLog ${APACHE_LOG_DIR}/mesvotes_error.log
+    CustomLog ${APACHE_LOG_DIR}/mesvotes_access.log combined
 </VirtualHost>
 ```
 
 ```bash
 sudo a2ensite mesvotes.fr && sudo apachectl configtest && sudo systemctl reload apache2
-sudo apt install -y certbot python3-certbot-apache
-sudo certbot --apache -d mesvotes.fr
+sudo certbot --apache -d mesvotes.fr --redirect
 ```
+
+Certbot crée la version HTTPS (`mesvotes.fr-le-ssl.conf`) et redirige le HTTP vers le HTTPS.
 
 ---
 
