@@ -33,7 +33,7 @@ const GENERIC = "La vérification anti-robot a échoué. Recharge la page et ré
 
 /** Vérifie la preuve envoyée avec un formulaire ; lève une erreur 400 sinon. */
 export function verify(body, { minMs = MIN_MS } = {}) {
-  if (body && String(body.website || "").trim()) fail(400, GENERIC); // champ piège rempli
+  if (body && String(body.nepasremplir || "").trim()) fail(400, GENERIC); // champ piège rempli
   const a = body && body.antibot;
   if (!a || typeof a !== "object") fail(400, GENERIC);
   const salt = String(a.salt || ""), ts = Number(a.ts), bits = Number(a.bits), nonce = String(a.nonce ?? "");

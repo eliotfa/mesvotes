@@ -72,6 +72,6 @@ test("filtre de modération : retient insultes, menaces et données personnelles
 });
 
 test("anti-robot : un champ piège rempli ou une preuve absente sont refusés", () => {
-  assert.throws(() => verifyAntibot({ website: "http://spam" }), /anti-robot/);
+  assert.throws(() => verifyAntibot({ nepasremplir: "http://spam" }), /anti-robot/);
   assert.throws(() => verifyAntibot({}), /anti-robot/);
 });
