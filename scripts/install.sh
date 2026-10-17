@@ -13,13 +13,15 @@
 #   --repo URL              dépôt git (défaut : https://github.com/eliotfa/mesvotes.git)
 #   --branch BRANCHE        branche (défaut : main)
 #   --demo                  active le mode démo et charge les exemples
+#   --behind-proxy          un autre serveur web occupe déjà les ports 80/443 (détecté automatiquement)
+#   --app-port PORT         port local de l'application (défaut : 3010)
 #   --no-firewall           ne touche pas au pare-feu
 #   --yes                   ne pose aucune question
 set -euo pipefail
 
 DOMAIN=""; ACME_EMAIL=""; ADMIN_EMAIL=""; DIR="/opt/mesvotes"
 REPO="https://github.com/eliotfa/mesvotes.git"; BRANCH="main"
-DEMO="false"; FIREWALL="true"; ASSUME_YES="false"
+DEMO="false"; FIREWALL="true"; ASSUME_YES="false"; PROXY="auto"; APP_PORT="3010"
 
 bold() { printf '\033[1m%s\033[0m\n' "$*"; }
 info() { printf '\033[1;34m→\033[0m %s\n' "$*"; }
@@ -37,6 +39,8 @@ while [ $# -gt 0 ]; do
     --branch) BRANCH="$2"; shift 2 ;;
     --demo) DEMO="true"; shift ;;
     --no-firewall) FIREWALL="false"; shift ;;
+    --behind-proxy) PROXY="external"; shift ;;
+    --app-port) APP_PORT="$2"; shift 2 ;;
     --yes|-y) ASSUME_YES="true"; shift ;;
     -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) die "Option inconnue : $1" ;;
@@ -92,6 +96,16 @@ setenv() { # setenv CLE valeur  (remplace ou ajoute dans .env)
   esc=$(printf '%s' "$val" | sed -e 's/[\/&|]/\\&/g')
   if grep -qE "^#? ?${key}=" .env; then sed -i -E "s|^#? ?${key}=.*|${key}=${esc}|" .env; else printf '%s=%s\n' "$key" "$val" >> .env; fi
 }
+# Les ports 80/443 sont-ils déjà pris par un autre programme que mesvotes ?
+if [ "$PROXY" = "auto" ]; then
+  if ss -ltnpH '( sport = :80 or sport = :443 )' 2>/dev/null | grep -v docker-proxy | grep -q LISTEN; then
+    PROXY="external"
+    warn "Les ports 80/443 sont déjà utilisés ($(ss -ltnpH '( sport = :80 or sport = :443 )' | grep -v docker-proxy | grep -o 'users:(("[^"]*' | cut -d'"' -f2 | sort -u | tr '\n' ' '))."
+    warn "mesvotes tournera derrière ton serveur web existant, sans Caddy."
+  else PROXY="caddy"; fi
+fi
+if ss -ltnH "( sport = :$APP_PORT )" 2>/dev/null | grep -v docker-proxy | grep -q LISTEN; then die "Le port local $APP_PORT est déjà pris. Relance avec --app-port 3020 (par exemple)."; fi
+
 if [ ! -f .env ]; then
   cp .env.example .env
   setenv DOMAIN "$DOMAIN"
@@ -100,6 +114,8 @@ if [ ! -f .env ]; then
   setenv ADMIN_EMAIL "$ADMIN_EMAIL"
   setenv DEMO_MODE "$DEMO"
   setenv SEED_DEMO "$DEMO"
+  setenv APP_PORT "$APP_PORT"
+  if [ "$PROXY" = "external" ]; then setenv COMPOSE_PROFILES ""; else setenv COMPOSE_PROFILES "caddy"; fi
   chmod 600 .env
   ok "Configuration créée : $DIR/.env"
 else
@@ -109,6 +125,9 @@ fi
 mkdir -p data backups
 chown -R 1000:1000 data
 chmod +x scripts/*.sh
+
+APP_PORT=$(grep -E '^APP_PORT=' .env | cut -d= -f2); APP_PORT=${APP_PORT:-3010}
+grep -qE '^COMPOSE_PROFILES=.*caddy' .env && PROXY="caddy" || PROXY="external"
 
 if [ "$FIREWALL" = "true" ]; then
   info "Pare-feu : SSH, HTTP et HTTPS ouverts, le reste fermé"
@@ -126,7 +145,8 @@ if [ -n "$PUBLIC_IP" ] && [ "$PUBLIC_IP" != "$DNS_IP" ]; then
 fi
 
 info "Construction et démarrage (première fois : 1 à 2 minutes)"
-docker compose up -d --build
+docker compose up -d --build --remove-orphans
+[ "$PROXY" = "external" ] && docker compose rm -sf caddy >/dev/null 2>&1 || true
 ok "Conteneurs démarrés"
 
 cat > /etc/cron.d/mesvotes <<CRON
@@ -143,7 +163,14 @@ for i in $(seq 1 30); do
 done
 
 echo
-bold "C'est en ligne : https://$DOMAIN"
+if [ "$PROXY" = "external" ]; then
+  bold "L'application tourne sur http://127.0.0.1:$APP_PORT (visible seulement depuis ce serveur)."
+  echo "  Dernière étape : faire servir $DOMAIN par ton serveur web existant."
+  echo "  Le guide pas à pas (Nginx, Apache, Traefik, Caddy) : $DIR/docs/reverse-proxy.md"
+  echo
+else
+  bold "C'est en ligne : https://$DOMAIN"
+fi
 echo "  • Le premier compte créé ${ADMIN_EMAIL:+(ou $ADMIN_EMAIL) }devient administrateur."
 echo "  • Configuration : $DIR/.env  (puis : cd $DIR && docker compose up -d)"
 echo "  • Journaux      : cd $DIR && docker compose logs -f app"

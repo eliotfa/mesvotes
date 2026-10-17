@@ -1,4 +1,7 @@
-# mesvotes en production : l'application + Caddy (HTTPS automatique avec Let's Encrypt).
+# mesvotes en production.
+# - L'application écoute sur 127.0.0.1:${APP_PORT} (accessible seulement depuis le serveur).
+# - Caddy (HTTPS automatique) ne démarre que si .env contient COMPOSE_PROFILES=caddy.
+#   Sans lui, c'est ton serveur web existant (Nginx, Apache…) qui sert mesvotes : voir docs/reverse-proxy.md
 # Les valeurs viennent du fichier .env (voir .env.example).
 
 services:
@@ -12,14 +15,15 @@ services:
       TRUST_PROXY: "true"
     volumes:
       - ./data:/data
-    expose:
-      - "3000"
+    ports:
+      - "127.0.0.1:${APP_PORT:-3010}:3000"
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "5" }
 
   caddy:
     image: caddy:2-alpine
+    profiles: ["caddy"]
     restart: unless-stopped
     depends_on:
       - app

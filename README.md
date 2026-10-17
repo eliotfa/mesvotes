@@ -79,6 +79,8 @@ Le script, en quelques minutes :
 5. démarre l'application et Caddy, qui obtient seul le certificat HTTPS ;
 6. programme une sauvegarde quotidienne (gardée 14 jours).
 
+**Ton serveur héberge déjà un autre site ?** Si les ports 80/443 sont occupés (Nginx, Apache…), le script le détecte : mesvotes tourne alors sans son propre Caddy, sur `127.0.0.1:3010`, et il ne reste qu'à ajouter un site dans ton serveur web existant. Guide pas à pas : [docs/reverse-proxy.md](docs/reverse-proxy.md).
+
 Options utiles : `--admin-email moi@exemple.fr` (ce compte deviendra administrateur), `--demo` (mode démo avec données d'exemple), `--no-firewall`, `--dir /autre/dossier`.
 
 ### 3. Créer ton compte administrateur
@@ -100,6 +102,8 @@ cd /opt/mesvotes && sudo docker compose up -d
 | Variable | Rôle |
 |---|---|
 | `DOMAIN`, `BASE_URL` | Domaine et adresse publique du site. |
+| `COMPOSE_PROFILES` | `caddy` : HTTPS géré par le Caddy intégré. Vide : derrière ton serveur web ([guide](docs/reverse-proxy.md)). |
+| `APP_PORT` | Port local de l'application (défaut `3010`, lié à `127.0.0.1` uniquement). |
 | `ACME_EMAIL` | E-mail pour Let's Encrypt (alertes de certificat). |
 | `ADMIN_EMAIL` | Ce compte devient administrateur à l'inscription. |
 | `DEMO_MODE` | `true` : les administrateurs peuvent passer à l'étape suivante sans attendre. |
