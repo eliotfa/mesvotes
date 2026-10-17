@@ -153,11 +153,14 @@ route("POST", "/api/auth/reset", async (req, res) => {
   return { ok: true };
 });
 
-route("PATCH", "/api/me", async (req) => {
+route("PATCH", "/api/me", async (req, res) => {
   const u = requireUser(req), b = await readJson(req);
   if (!verifyPassword(b.currentPassword, u.pass_hash)) fail(401, "Mot de passe actuel incorrect.");
   if (String(b.newPassword || "").length < 8) fail(400, "Le nouveau mot de passe doit faire au moins 8 caractères.");
   q("UPDATE users SET pass_hash=? WHERE id=?").run(hashPassword(b.newPassword), u.id);
+  // Les autres appareils perdent leur session (une session volée ne survit pas au changement) ;
+  // celui qui vient de changer le mot de passe reste connecté.
+  revokeSessions(u.id); createSession(res, u.id);
   return { ok: true };
 });
 
@@ -201,8 +204,8 @@ route("GET", "/api/proposals", (req, res, { url }) => {
   };
 });
 
+// Lecture seule : l'horloge (tick) fait avancer les phases, une lecture ne modifie rien.
 route("GET", "/api/proposals/:id", (req, res, { params }) => {
-  settle(params.id);
   const d = proposalDetail(params.id, currentUser(req));
   if (!d) fail(404, "Proposition introuvable.");
   return d;
@@ -415,6 +418,21 @@ const MIME = { pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", jpeg
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation" };
 const uploadDir = () => path.join(config.dataDir, "uploads");
 
+// Premiers octets attendus pour chaque format binaire (les formats Office et OpenDocument sont des archives zip).
+const SIGNATURES = {
+  pdf: "255044462d", png: "89504e470d0a1a0a", jpg: "ffd8ff", jpeg: "ffd8ff", gif: "474946", webp: "52494646",
+  docx: "504b0304", xlsx: "504b0304", pptx: "504b0304", odt: "504b0304", ods: "504b0304", odp: "504b0304"
+};
+const TEXT_EXT = ["txt", "csv", "md"];
+/** Vérifie que le contenu correspond à l'extension annoncée (un .pdf qui est un exécutable est refusé). */
+export function matchesType(ext, buf) {
+  if (TEXT_EXT.includes(ext)) return !buf.includes(0);
+  if (ext === "webp") return buf.length >= 12 && buf.subarray(0, 4).toString("latin1") === "RIFF" && buf.subarray(8, 12).toString("latin1") === "WEBP";
+  const sig = SIGNATURES[ext];
+  return Boolean(sig) && buf.subarray(0, sig.length / 2).toString("hex") === sig;
+}
+const ORPHAN_HOURS = 24;
+
 route("POST", "/api/uploads", async (req) => {
   const u = requireActive(req);
   rateLimit("upload:" + u.id, 30, 3600e3, "Trop de fichiers envoyés en une heure.");
@@ -422,14 +440,27 @@ route("POST", "/api/uploads", async (req) => {
   name = path.basename(name).replace(/[^\p{L}\p{N} ._()-]/gu, "_").slice(0, 120);
   const ext = (name.split(".").pop() || "").toLowerCase();
   if (!name || !MIME[ext]) fail(400, "Type de fichier non accepté. Formats possibles : " + Object.keys(MIME).join(", ") + ".");
+  const used = q("SELECT COALESCE(SUM(size),0) s FROM uploads WHERE user_id=?").get(u.id).s;
+  const declared = Number(req.headers["content-length"] || 0);
+  if (used + declared > config.maxUserStorageBytes) fail(413, `Espace de fichiers épuisé (${Math.round(config.maxUserStorageBytes / 1048576)} Mo par compte). Supprime une proposition ou demande à un administrateur.`);
   const buf = await readBody(req, config.maxUploadBytes);
   if (!buf.length) fail(400, "Fichier vide.");
-  const id = uid(20);
+  if (!matchesType(ext, buf)) fail(400, "Le contenu du fichier ne correspond pas à son extension.");
+  if (used + buf.length > config.maxUserStorageBytes) fail(413, "Espace de fichiers épuisé pour ce compte.");
+  const id = uid(20), file = path.join(uploadDir(), id);
   fs.mkdirSync(uploadDir(), { recursive: true });
-  fs.writeFileSync(path.join(uploadDir(), id), buf);
-  q("INSERT INTO uploads(id,user_id,name,mime,size,date) VALUES (?,?,?,?,?,?)").run(id, u.id, name, MIME[ext], buf.length, now());
+  fs.writeFileSync(file, buf);
+  try { q("INSERT INTO uploads(id,user_id,name,mime,size,date) VALUES (?,?,?,?,?,?)").run(id, u.id, name, MIME[ext], buf.length, now()); }
+  catch (e) { fs.rmSync(file, { force: true }); throw e; } // pas de fichier sans ligne en base
   return { id, name, size: buf.length };
 });
+
+/** Supprime les fichiers envoyés et jamais rattachés à une proposition au bout de 24 h. */
+export function purgeOrphanUploads(at = now()) {
+  const rows = q(`SELECT id FROM uploads u WHERE u.date<? AND NOT EXISTS (SELECT 1 FROM proposals p WHERE instr(p.files, u.id) > 0)`).all(at - ORPHAN_HOURS * 3600e3);
+  for (const { id } of rows) { fs.rmSync(path.join(uploadDir(), id), { force: true }); q("DELETE FROM uploads WHERE id=?").run(id); }
+  return rows.length;
+}
 
 export function serveUpload(req, res, id) {
   const f = q("SELECT * FROM uploads WHERE id=?").get(String(id));

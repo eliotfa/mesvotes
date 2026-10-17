@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { config } from "./config.js";
 import { db } from "./db.js";
 import { HttpError, sendJson } from "./http.js";
-import { handleApi, serveUpload } from "./api.js";
+import { handleApi, serveUpload, purgeOrphanUploads } from "./api.js";
 import { ensureConstitution } from "./model.js";
 import { tick } from "./lifecycle.js";
 import { tickModeration } from "./moderation.js";
@@ -78,11 +78,13 @@ if (isMain) {
     console.log(`mesvotes en écoute sur ${config.host}:${config.port} (${config.baseUrl})`);
     console.log(`  e-mails : ${config.mailEnabled ? "SMTP " + config.smtp.host : "désactivés (liens affichés dans ces journaux)"} · mode démo : ${config.demoMode ? "oui" : "non"}`);
   });
+  let lastUploadPurge = 0;
   const timer = setInterval(() => {
     try {
       const n = tick(); if (n) console.log(`[horloge] ${n} proposition(s) ont changé de phase`);
       const m = tickModeration(); if (m) console.log(`[horloge] ${m} affaire(s) de modération traitée(s)`);
       purgeExpired();
+      if (Date.now() - lastUploadPurge > 3600e3) { lastUploadPurge = Date.now(); purgeOrphanUploads(); }
     }
     catch (e) { console.error("[horloge]", e); }
   }, config.tickSeconds * 1000);

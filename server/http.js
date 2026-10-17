@@ -39,8 +39,15 @@ export async function readJson(req, limit = 1024 * 1024) {
   try { return JSON.parse(buf.toString("utf8")); } catch { fail(400, "Requête illisible."); }
 }
 
+/**
+ * IP du visiteur. Derrière notre proxy, la dernière valeur de X-Forwarded-For est celle qu'il
+ * a ajoutée lui-même ; la première peut être fournie par le visiteur, donc falsifiée.
+ */
 export function clientIp(req, trustProxy) {
-  if (trustProxy) { const f = req.headers["x-forwarded-for"]; if (f) return String(f).split(",")[0].trim(); }
+  if (trustProxy) {
+    const f = req.headers["x-forwarded-for"];
+    if (f) return String(f).split(",").pop().trim();
+  }
   return req.socket.remoteAddress || "?";
 }
 

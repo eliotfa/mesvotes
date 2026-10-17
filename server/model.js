@@ -140,11 +140,13 @@ export function proposalSummaries(viewer) {
   const nVotes = count("SELECT proposal_id id, COUNT(*) c FROM votes GROUP BY proposal_id");
   const last = Object.fromEntries(q(`SELECT pv.proposal_id id, pv.text, pv.cst FROM proposal_versions pv
      JOIN (SELECT proposal_id, MAX(n) m FROM proposal_versions GROUP BY proposal_id) x ON x.proposal_id=pv.proposal_id AND pv.n=x.m`).all().map(r => [r.id, r]));
-  const users = Object.fromEntries(q("SELECT id, pseudo, minor FROM users").all().map(u => [u.id, { pseudo: u.pseudo, minor: !!u.minor }]));
   const laws = Object.fromEntries(q("SELECT id, title FROM laws").all().map(l => [l.id, l.title]));
-  const rows = q(`SELECT * FROM proposals ${isMod(viewer) ? "" : "WHERE hidden=0"}`).all();
-  return rows.map(rowToProposal).map(p => {
-    const lv = last[p.id] || {}, a = users[p.authorId] || { pseudo: "inconnu", minor: false };
+  // Auteurs joints à la requête : on ne charge pas toute la table des comptes à chaque liste.
+  const rows = q(`SELECT p.*, u.pseudo AS a_pseudo, u.minor AS a_minor FROM proposals p
+     LEFT JOIN users u ON u.id=p.author_id ${isMod(viewer) ? "" : "WHERE p.hidden=0"}`).all();
+  return rows.map(r => {
+    const p = rowToProposal(r), lv = last[p.id] || {};
+    const a = r.a_pseudo ? { pseudo: r.a_pseudo, minor: !!r.a_minor } : { pseudo: "inconnu", minor: false };
     const lawTitle = p.target ? laws[p.target.lawId] || "" : "";
     const s = {
       id: p.id, kind: p.kind, title: p.title, summary: p.summary, author: a, themes: p.themes, tags: p.tags, is2027: p.is2027,

@@ -209,7 +209,17 @@ const MIGRATIONS = [
   );
   CREATE INDEX notifications_user ON notifications(user_id, read);
   `,
-  // v3 : suppression définitive d'un contenu masqué, décidée par un vote de la communauté
+  // v3 : index pour les requêtes qui parcourent les comptes, les propositions et les fichiers
+  `
+  CREATE INDEX users_active ON users(banned, email_verified, pass_hash);
+  CREATE INDEX proposals_author ON proposals(author_id);
+  CREATE INDEX proposals_fork ON proposals(fork_of);
+  CREATE INDEX proposals_law ON proposals(target_law);
+  CREATE INDEX uploads_user ON uploads(user_id);
+  CREATE INDEX sanctions_user ON sanctions(user_id, revoked);
+  CREATE INDEX parrainages_user ON parrainages(user_id);
+  `,
+  // v4 : suppression définitive d'un contenu masqué, décidée par un vote de la communauté
   `
   CREATE TABLE deletion_votes(
     target_type TEXT NOT NULL,

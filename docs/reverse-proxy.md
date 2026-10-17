@@ -104,7 +104,7 @@ mesvotes.fr {
 
 ## Points importants
 
-- **Ne transmets pas l'en-tête `X-Forwarded-For` en l'ajoutant** (`$proxy_add_x_forwarded_for`) : utilise `$remote_addr`, comme ci-dessus. mesvotes s'en sert pour limiter les tentatives de connexion par adresse, et une valeur ajoutée pourrait être falsifiée par le visiteur.
+- **Préfère `$remote_addr`** à `$proxy_add_x_forwarded_for`, comme ci-dessus. mesvotes lit la dernière valeur de `X-Forwarded-For` (celle ajoutée par ton serveur) : `$proxy_add_x_forwarded_for` fonctionne donc aussi, mais `$remote_addr` reste plus simple à vérifier.
 - **`BASE_URL` dans `.env` doit être `https://mesvotes.fr`** : c'est ce qui active les cookies sécurisés et les bons liens dans les e-mails.
 - Le port `3010` n'est jamais ouvert sur internet : Docker le lie à `127.0.0.1` uniquement.
 - Pour repasser plus tard au Caddy intégré (serveur dédié à mesvotes), mets `COMPOSE_PROFILES=caddy` dans `.env` puis `sudo docker compose up -d`.

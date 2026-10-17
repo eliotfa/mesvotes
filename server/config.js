@@ -26,6 +26,7 @@ export const config = {
   seedDemo: bool(env.SEED_DEMO, false),
   adminEmail: (env.ADMIN_EMAIL || "").trim().toLowerCase(),
   maxUploadBytes: Number(env.MAX_UPLOAD_MB || 10) * 1024 * 1024,
+  maxUserStorageBytes: Number(env.MAX_USER_STORAGE_MB || 200) * 1024 * 1024,
   tickSeconds: Number(env.TICK_SECONDS || 60),
   initialParams,
   goalMembers: Number(env.GOAL_MEMBERS || 1000000),

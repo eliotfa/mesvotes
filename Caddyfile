@@ -14,7 +14,11 @@
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		-Server
 	}
-	reverse_proxy app:3000
+	reverse_proxy app:3000 {
+		# Caddy ajoute l'IP réelle à la fin de X-Forwarded-For ; on la remplace pour qu'aucune
+		# valeur envoyée par le visiteur ne soit transmise (les limites de débit s'appuient dessus).
+		header_up X-Forwarded-For {remote_host}
+	}
 }
 
 # www.{$DOMAIN} {

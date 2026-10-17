@@ -270,8 +270,8 @@ Toute requête d'écriture doit porter l'en-tête `x-mesvotes: 1` (protection CS
 
 **Limites assumées à ce stade :**
 
-- **Pas de vérification d'identité.** Une même personne peut créer plusieurs comptes avec plusieurs e-mails. La vérification KYC est prévue plus tard.
-- **Le secret du vote n'est pas cryptographique.** La base associe chaque vote à un compte (c'est ce qui permet de changer d'avis jusqu'à la clôture). Les résultats ne sont publiés qu'agrégés, mais un administrateur ayant accès au serveur pourrait lire les votes. Une évolution possible : des bulletins anonymes avec jeton à usage unique.
+- **Pas de vérification d'identité.** Une même personne peut créer plusieurs comptes avec plusieurs e-mails. Les options (niveaux de confiance, parrainage, prestataire de vérification) sont décrites dans [docs/identite-et-vote-secret.md](docs/identite-et-vote-secret.md).
+- **Le secret du vote n'est pas cryptographique.** La base associe chaque vote à un compte (c'est ce qui permet de changer d'avis jusqu'à la clôture). Les résultats ne sont publiés qu'agrégés, mais un administrateur ayant accès au serveur pourrait lire les votes. Une évolution prévue : des bulletins anonymes avec jetons à usage unique (voir le document ci-dessus).
 - **Mineurs :** l'âge est déclaratif.
 - **Données personnelles :** si le site s'ouvre largement, les opinions politiques sont des données sensibles au sens du RGPD. Il faudra alors une politique de confidentialité, des mentions légales et une analyse d'impact.
 
