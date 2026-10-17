@@ -76,7 +76,7 @@ test("anti-robot : défi obligatoire, usage unique, champ piège", async () => {
   assert.equal((await c.post("/api/auth/register", { email: "bot@test.fr", pseudo: "robot1", password: "motdepasse1", consent: true }, { antibot: false })).status, 400);
   const proof = await solve();
   assert.equal((await c.post("/api/auth/register", { email: "bot2@test.fr", pseudo: "robot2", password: "motdepasse1", consent: true, antibot: { ...proof, nonce: "999999999999" } }, { antibot: false })).status, 400, "mauvaise preuve");
-  assert.equal((await c.post("/api/auth/register", { email: "bot3@test.fr", pseudo: "robot3", password: "motdepasse1", consent: true, website: "http://spam.example" })).status, 400, "champ piège rempli");
+  assert.equal((await c.post("/api/auth/register", { email: "bot3@test.fr", pseudo: "robot3", password: "motdepasse1", consent: true, nepasremplir: "http://spam.example" })).status, 400, "champ piège rempli");
   ok(await c.post("/api/auth/login", { email: "ana@test.fr", password: "motdepasse1", antibot: proof }, { antibot: false }));
   assert.equal((await c.post("/api/auth/login", { email: "ana@test.fr", password: "motdepasse1", antibot: proof }, { antibot: false })).status, 400, "une preuve ne sert qu'une fois");
 });
