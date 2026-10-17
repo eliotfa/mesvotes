@@ -100,16 +100,25 @@ function reasonSummary(caseId) {
 }
 
 /* ---------- tirage au sort ---------- */
-function eligibleIds(caseId, exclude) {
+/**
+ * Tire au sort jusqu'à `count` comptes éligibles, sans charger toute la communauté en mémoire :
+ * on lit un rang au hasard (crypto.randomInt) et on écarte les doublons et les exclus.
+ */
+function drawEligible(caseId, count, exclude) {
   const ex = new Set(exclude.filter(Boolean).map(Number));
   q("SELECT user_id FROM case_jurors WHERE case_id=?").all(caseId).forEach(r => ex.add(r.user_id));
-  const rows = q(`SELECT id FROM users WHERE pass_hash IS NOT NULL AND banned=0 AND suspended_until<? ${config.mailEnabled ? "AND email_verified=1" : ""}`).all(now());
-  return rows.map(r => r.id).filter(id => !ex.has(id));
+  const where = `pass_hash IS NOT NULL AND banned=0 AND suspended_until<? ${config.mailEnabled ? "AND email_verified=1" : ""}`;
+  const total = q(`SELECT COUNT(*) c FROM users WHERE ${where}`).get(now()).c;
+  const picked = [];
+  // Le rejet est borné : au pire on tire moins de jurés que demandé, jamais une boucle infinie.
+  for (let tries = 0; total > 0 && picked.length < count && tries < count * 50; tries++) {
+    const row = q(`SELECT id FROM users WHERE ${where} LIMIT 1 OFFSET ?`).get(now(), crypto.randomInt(total));
+    if (row && !ex.has(row.id) && !picked.includes(row.id)) picked.push(row.id);
+  }
+  return picked;
 }
 function drawJurors(caseId, count, exclude) {
-  const pool = eligibleIds(caseId, exclude);
-  for (let i = pool.length - 1; i > 0; i--) { const j = crypto.randomInt(i + 1); [pool[i], pool[j]] = [pool[j], pool[i]]; }
-  let picked = pool.slice(0, count);
+  let picked = drawEligible(caseId, count, exclude);
   const already = q("SELECT COUNT(*) c FROM case_jurors WHERE case_id=?").get(caseId).c;
   // Communauté trop petite : les administrateurs complètent le jury (jamais l'auteur ni les signaleurs).
   if (already + picked.length < 3) {
