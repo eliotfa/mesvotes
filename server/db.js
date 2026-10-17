@@ -228,6 +228,16 @@ const MIGRATIONS = [
     date INTEGER NOT NULL,
     PRIMARY KEY(target_type, target_id, user_id)
   );
+  `,
+  // v5 : avis favorable / défavorable sur une proposition (indicatif, distinct du vote officiel)
+  `
+  CREATE TABLE opinions(
+    proposal_id TEXT NOT NULL REFERENCES proposals(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    value INTEGER NOT NULL CHECK(value IN (1, -1)),
+    date INTEGER NOT NULL,
+    PRIMARY KEY(proposal_id, user_id)
+  );
   `
 ];
 

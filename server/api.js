@@ -12,7 +12,7 @@ import { sendMail, maskEmail } from "./mail.js";
 import { renderMail } from "./mail-template.js";
 import {
   now, uid, isMod, isAdmin, journal, cstNow, cstAll, electorate, getProposal, proposalDetail, proposalSummaries,
-  lawFull, lawsAll, lastVersion, versionsOf
+  lawFull, lawsAll, lastVersion, versionsOf, avisState, AVIS_PHASES
 } from "./model.js";
 import { settle, forceAdvance } from "./lifecycle.js";
 import { flag, castVote, appeal, moderationOverview, caseDetail, urgentRemove, voteDeletion, clearDeletionVotes } from "./moderation.js";
@@ -204,6 +204,7 @@ route("GET", "/api/proposals", (req, res, { url }) => {
     echeance: (a, b) => ((a.phase === "fin") - (b.phase === "fin")) || (a.phaseEnd - b.phaseEnd),
     contrib: (a, b) => b.notesCount - a.notesCount,
     parrains: (a, b) => b.parrains - a.parrains,
+    avis: (a, b) => { const s = x => x.avis ? x.avis.pour - x.avis.contre : 0, n = x => x.avis ? x.avis.pour + x.avis.contre : 0; return (s(b) - s(a)) || (n(b) - n(a)); },
     titre: (a, b) => a.title.localeCompare(b.title, "fr")
   };
   L.sort(sorters[f("sort")] || sorters.avance);
@@ -391,6 +392,21 @@ route("POST", "/api/proposals/:id/parrainage", async (req, res, { params }) => {
   else q("INSERT OR IGNORE INTO parrainages(proposal_id,user_id,date) VALUES (?,?,?)").run(p.id, u.id, now());
   const after = settle(p.id);
   return { phase: after.phase };
+});
+
+// Avis favorable (1) ou défavorable (-1), 0 pour le retirer. Un seul avis par inscrit, modifiable.
+route("POST", "/api/proposals/:id/avis", async (req, res, { params }) => {
+  const u = requireActive(req), p = loadForAction(params.id), b = await readJson(req);
+  rateLimit("avis:" + u.id, 120, 3600e3, "Tu as donné beaucoup d'avis en peu de temps. Réessaie plus tard.");
+  if (p.authorId === u.id) fail(400, "Tu ne peux pas donner ton avis sur ta propre proposition.");
+  if (!AVIS_PHASES.includes(p.phase)) fail(409, p.phase === "vote" ? "Le vote officiel est ouvert : les avis sont fermés jusqu'à la clôture." : "Le parcours de cette proposition est terminé : les avis sont clos.");
+  const value = Number(b.value);
+  if (value === 0) q("DELETE FROM opinions WHERE proposal_id=? AND user_id=?").run(p.id, u.id);
+  else if (value === 1 || value === -1)
+    q(`INSERT INTO opinions(proposal_id,user_id,value,date) VALUES (?,?,?,?)
+       ON CONFLICT(proposal_id,user_id) DO UPDATE SET value=excluded.value, date=excluded.date`).run(p.id, u.id, value, now());
+  else fail(400, "Avis inconnu : favorable (1), défavorable (-1) ou retiré (0).");
+  return avisState(p, u.id);
 });
 
 route("POST", "/api/proposals/:id/vote", async (req, res, { params }) => {

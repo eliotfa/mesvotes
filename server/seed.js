@@ -49,6 +49,8 @@ function seed() {
     });
     (o.parrains ? crowd.slice(0, o.parrains) : []).forEach(c => q("INSERT INTO parrainages(proposal_id,user_id,date) VALUES (?,?,?)").run(id, c.id, ago(1)));
     (o.votes || []).forEach((choice, i) => q("INSERT INTO votes(proposal_id,user_id,choice,minor,date) VALUES (?,?,?,?,?)").run(id, crowd[i].id, choice, crowd[i].minor ? 1 : 0, ago(1)));
+    const [up, down] = o.avis || [0, 0];
+    crowd.slice(0, up + down).forEach((c, i) => q("INSERT INTO opinions(proposal_id,user_id,value,date) VALUES (?,?,?,?)").run(id, c.id, i < up ? 1 : -1, ago(1)));
     return id;
   };
 
@@ -67,7 +69,7 @@ function seed() {
   const ricV3 = "Un référendum peut être déclenché par 700 000 citoyens inscrits sur les listes électorales, soit environ 1,5 % du corps électoral.\n\nIl peut proposer, modifier ou abroger une loi. Il ne peut pas porter atteinte aux droits fondamentaux garantis par la Constitution.\n\nLe vote a lieu dans l'année qui suit la validation des signatures.\n\nLe Conseil constitutionnel vérifie la recevabilité de la question avant la collecte des signatures.";
   prop({ title: "Inscrire le référendum d'initiative citoyenne dans la Constitution", summary: "Permettre à 700 000 citoyens de déclencher un référendum pour proposer, modifier ou abroger une loi.",
     author: "citoyenne_ana", themes: ["Institutions"], tags: ["référendum", "démocratie-directe"], is2027: true, phase: "vote",
-    dates: { projet: ago(250), parrainage: ago(190), deliberation: ago(180), vote: ago(3) }, projetDays: 60, delibDays: 177, parrains: 55,
+    dates: { projet: ago(250), parrainage: ago(190), deliberation: ago(180), vote: ago(3) }, projetDays: 60, delibDays: 177, parrains: 55, avis: [48, 14],
     votes: [..."ppppppppppppppppppppccccccccccaaa"],
     links: [{ label: "ch.ch", url: "https://www.ch.ch/fr/votations-et-elections/" }],
     versions: [[ago(250), "Version initiale", ricV1], [ago(225), "Intègre l'amendement de @Karim.B (§1)", ricV2], [ago(200), "Intègre l'amendement de @juju_lgr (§2) et ajoute un §4", ricV3]],
@@ -79,7 +81,7 @@ function seed() {
     ] });
   prop({ title: "Reconnaître le vote blanc comme un suffrage exprimé", summary: "Compter les bulletins blancs dans les résultats, et annuler l'élection s'ils arrivent en tête.",
     author: "Karim.B", themes: ["Institutions"], tags: ["vote-blanc", "élections"], is2027: true, phase: "deliberation",
-    dates: { projet: ago(110), parrainage: ago(75), deliberation: ago(41) }, projetDays: 35, delibDays: 120, parrains: 52,
+    dates: { projet: ago(110), parrainage: ago(75), deliberation: ago(41) }, projetDays: 35, delibDays: 120, parrains: 52, avis: [37, 21],
     versions: [[ago(110), "Version initiale", "Les bulletins blancs sont comptés comme suffrages exprimés dans toutes les élections.\n\nSi le vote blanc arrive en tête, l'élection est annulée et organisée à nouveau sous trois mois, sans les mêmes candidats."],
       [ago(85), "Intègre l'amendement de @citoyenne_ana (§3)", "Les bulletins blancs sont comptés comme suffrages exprimés dans toutes les élections.\n\nSi le vote blanc arrive en tête, l'élection est annulée et organisée à nouveau sous trois mois, sans les mêmes candidats.\n\nPour l'élection présidentielle, le président sortant reste en fonction jusqu'à la nouvelle élection."]],
     notes: [
@@ -88,7 +90,7 @@ function seed() {
     ] });
   prop({ title: "50 % de produits locaux dans les cantines scolaires", summary: "Imposer qu'au moins la moitié des produits servis viennent de moins de 150 km.",
     author: "Sandrine_R", themes: ["Éducation", "Écologie"], tags: ["alimentation", "agriculture", "enfance"], phase: "parrainage",
-    dates: { projet: ago(50), parrainage: ago(9) }, projetDays: 40, parrains: 31,
+    dates: { projet: ago(50), parrainage: ago(9) }, projetDays: 40, parrains: 31, avis: [44, 9],
     versions: [[ago(50), "Version initiale", "Les cantines des écoles, collèges et lycées publics servent au moins 50 % de produits issus d'exploitations situées à moins de 150 km.\n\nL'État compense le surcoût pour les communes de moins de 5 000 habitants.\n\nL'objectif est atteint en trois ans, avec un bilan public chaque année."]],
     notes: [
       { type: "comment", author: "Lea.T", days: 30, text: "Dans mon collège la cantine c'est vraiment pas bon, si ça change ça je signe direct." },
@@ -96,7 +98,7 @@ function seed() {
     ] });
   prop({ title: "Publier en open data les dépenses des élus", summary: "Chaque frais de mandat est publié en ligne, avec justificatif, sous 30 jours.",
     author: "juju_lgr", themes: ["Institutions", "Justice"], tags: ["transparence", "élus", "open-data"], is2027: true, phase: "projet",
-    dates: { projet: ago(15) }, projetDays: 45, delibDays: 120, links: [{ label: "hatvp.fr", url: "https://www.hatvp.fr/" }],
+    dates: { projet: ago(15) }, projetDays: 45, delibDays: 120, avis: [29, 3], links: [{ label: "hatvp.fr", url: "https://www.hatvp.fr/" }],
     versions: [[ago(15), "Version initiale", "Les députés, sénateurs et maires des villes de plus de 10 000 habitants publient leurs frais de mandat.\n\nChaque dépense de plus de 100 € est publiée avec son justificatif.\n\nLes données sont mises en ligne dans un format ouvert."],
       [ago(6), "Intègre l'amendement de @theo_m (§3)", "Les députés, sénateurs et maires des villes de plus de 10 000 habitants publient leurs frais de mandat.\n\nChaque dépense de plus de 100 € est publiée avec son justificatif.\n\nLes données sont mises en ligne sous 30 jours, dans un format ouvert et réutilisable (CSV), sur un site public unique."]],
     notes: [
@@ -106,21 +108,21 @@ function seed() {
     ] });
   prop({ id: guichetId, title: "Un guichet unique pour créer et gérer son entreprise", summary: "Un seul interlocuteur et un seul site pour toutes les démarches des TPE et indépendants.",
     author: "Pierre_77", themes: ["Économie"], tags: ["entreprises", "simplification"], phase: "fin", lawId: lGuichet,
-    dates: { projet: ago(330), parrainage: ago(300), deliberation: ago(270), vote: ago(26), fin: ago(19) }, delibDays: 244,
+    dates: { projet: ago(330), parrainage: ago(300), deliberation: ago(270), vote: ago(26), fin: ago(19) }, delibDays: 244, avis: [51, 8],
     result: { outcome: "adopted", votes: { maj: { p: 42, c: 13, a: 7 }, min: { p: 2, c: 1, a: 2 } }, electorate: 81, pourPct: 75.9, participationPct: 82.7, needMaj: 50, needQuo: 5, closedAt: ago(19), applied: "La loi entre dans le recueil." },
     versions: [[ago(330), "Version initiale", guichetText]] });
   prop({ title: "Transports en commun gratuits pour les moins de 18 ans", summary: "Bus, tram, métro et TER gratuits pour tous les mineurs, partout en France.",
-    author: "Lea.T", themes: ["Transports", "Social"], tags: ["jeunesse", "gratuité", "mobilité"], phase: "projet", dates: { projet: ago(3) },
+    author: "Lea.T", themes: ["Transports", "Social"], tags: ["jeunesse", "gratuité", "mobilité"], phase: "projet", dates: { projet: ago(3) }, avis: [12, 10],
     versions: [[ago(3), "Version initiale", "Les transports en commun urbains et les TER sont gratuits pour toutes les personnes de moins de 18 ans.\n\nUne carte unique valable dans toute la France remplace les abonnements scolaires."]],
     notes: [{ type: "comment", author: "Karim.B", days: 2, text: "Bonne idée, mais qui paie ? Il faudrait ajouter un paragraphe sur le financement, sinon ça ne passera jamais le débat." }] });
   prop({ kind: "modif", target: { lawId: lGuichet, base: 1 }, title: "Étendre le guichet unique aux associations",
     summary: "Les associations employeuses font les mêmes démarches que les TPE : elles doivent avoir le même guichet.",
-    author: "Mehdi.asso", themes: ["Économie", "Social"], tags: ["associations", "simplification"], phase: "projet", dates: { projet: ago(8) },
+    author: "Mehdi.asso", themes: ["Économie", "Social"], tags: ["associations", "simplification"], phase: "projet", dates: { projet: ago(8) }, avis: [8, 2],
     versions: [[ago(8), "Version initiale", "Toutes les démarches d'une entreprise ou d'une association de moins de 10 salariés passent par un seul site et un seul conseiller référent.\n\nUne administration ne peut pas redemander un document déjà fourni à une autre.\n\nSans réponse sous deux mois, une demande est considérée comme acceptée.\n\nLes associations sans salarié peuvent aussi y faire leurs déclarations et leurs demandes de subvention."]],
     notes: [{ type: "comment", author: "Pierre_77", days: 6, text: "Porteur de la loi d'origine ici : je suis pour. Attention juste à ne pas surcharger les conseillers, il faudra des moyens en plus." }] });
   prop({ kind: "abrog", target: { lawId: lPub, base: 1 }, title: "Abroger l'interdiction des écrans publicitaires numériques",
     summary: "Laisser chaque commune décider, plutôt qu'une interdiction nationale.", author: "Nadia.com", themes: ["Économie"], tags: ["publicité", "communes", "commerce"],
-    phase: "parrainage", dates: { projet: ago(40), parrainage: ago(12) }, parrains: 12,
+    phase: "parrainage", dates: { projet: ago(40), parrainage: ago(12) }, parrains: 12, avis: [9, 26],
     versions: [[ago(40), "Version initiale", "L'interdiction nationale pénalise les commerçants de centre-ville face aux grandes plateformes en ligne.\n\nLes écrans récents consomment beaucoup moins qu'au moment du vote de la loi.\n\nNous proposons d'abroger cette loi pour laisser chaque conseil municipal décider pour sa commune."]],
     notes: [{ type: "comment", author: "Sandrine_R", days: 25, text: "Laisser chaque commune décider, c'est surtout laisser les grandes enseignes faire pression ville par ville." }] });
   const base = { v: cst.n, params: cst.params, free: cst.free };

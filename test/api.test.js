@@ -360,3 +360,42 @@ test("fichiers joints : un contenu qui ne correspond pas à l'extension est refu
   assert.equal(r.status, 400);
   assert.match(r.data.error, /ne correspond pas/);
 });
+
+test("avis favorable / défavorable : un par inscrit, modifiable, caché pendant le vote", async () => {
+  resetRateLimits();
+  const { id } = ok(await ana.post("/api/proposals", { kind: "loi", title: "Avis sur une proposition", summary: "Tester les avis favorables et défavorables.",
+    text: "Un texte pour recueillir des avis.", projetDays: 15, delibDays: 90 }));
+  const avis = (c, value) => c.post(`/api/proposals/${id}/avis`, { value });
+  assert.equal((await avis(ana, 1)).status, 400, "le porteur ne donne pas d'avis sur sa propre proposition");
+  assert.equal((await client().post(`/api/proposals/${id}/avis`, { value: 1 })).status, 401);
+  assert.equal((await avis(bob, 2)).status, 400, "valeur inconnue");
+  ok(await avis(bob, 1));
+  ok(await avis(cleo, -1));
+  ok(await avis(admin, -1));
+  const r = ok(await avis(cleo, 1)); // changement d'avis
+  assert.deepEqual(r, { pour: 2, contre: 1, mine: 1, hidden: false, open: true });
+  ok(await avis(admin, 0)); // avis retiré
+  let d = ok(await bob.get(`/api/proposals/${id}`));
+  assert.equal(d.avis.pour, 2); assert.equal(d.avis.contre, 0); assert.equal(d.avis.mine, 1);
+  assert.equal(ok(await client().get(`/api/proposals/${id}`)).avis.mine, 0);
+  const item = ok(await bob.get("/api/proposals?sort=avis")).items.find(p => p.id === id);
+  assert.deepEqual(item.avis, { pour: 2, contre: 0 });
+  // Parrainage puis délibération : les avis restent ouverts.
+  jump(16);
+  ok(await bob.post(`/api/proposals/${id}/parrainage`, { on: true }));
+  ok(await cleo.post(`/api/proposals/${id}/parrainage`, { on: true }));
+  ok(await admin.post(`/api/proposals/${id}/avis`, { value: -1 }));
+  // Vote officiel : avis fermés et compteurs cachés, même dans la liste.
+  jump(91);
+  d = ok(await bob.get(`/api/proposals/${id}`));
+  assert.equal(d.phase, "vote");
+  assert.equal(d.avis.hidden, true); assert.equal(d.avis.pour, null); assert.equal(d.avis.contre, null);
+  assert.equal(ok(await bob.get("/api/proposals")).items.find(p => p.id === id).avis, null);
+  assert.equal((await avis(bob, -1)).status, 409);
+  // Clôture : compteurs de nouveau visibles, avis figés.
+  jump(8);
+  d = ok(await bob.get(`/api/proposals/${id}`));
+  assert.equal(d.phase, "fin");
+  assert.deepEqual([d.avis.pour, d.avis.contre, d.avis.open], [2, 1, false]);
+  assert.equal((await avis(bob, -1)).status, 409);
+});

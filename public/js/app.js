@@ -75,6 +75,12 @@ function durOptions(min, max, step, sel) {
   const pick = arr.includes(sel) ? sel : arr.reduce((b, v) => Math.abs(v - sel) < Math.abs(b - sel) ? v : b, arr[0]);
   return arr.map(v => `<option value="${v}" ${v === pick ? "selected" : ""}>${v} jour${v > 1 ? "s" : ""}${v >= 60 && v % 30 === 0 ? ` (${v / 30} mois)` : ""}</option>`).join("");
 }
+const THUMB = {
+  up: "M2 21h4V9H2v12zm20-11a2 2 0 0 0-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L13.17 1 6.59 7.59C6.22 7.95 6 8.45 6 9v10a2 2 0 0 0 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z",
+  down: "M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2a2 2 0 0 0 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5a2 2 0 0 0-2-2zm4 0v12h4V3h-4z"
+};
+const thumb = k => `<svg class="thumb" viewBox="0 0 24 24" aria-hidden="true"><path d="${THUMB[k]}"/></svg>`;
+const avisBar = (pour, contre) => { const t = pour + contre; return `<span class="stacked"><span style="width:${pct(pour, t)}%;background:var(--pour)"></span><span style="width:${pct(contre, t)}%;background:var(--contre)"></span></span>`; };
 const needMaj = p => p.kind === "const" ? p.rules.constMajorityPct : p.rules.majorityPct;
 const needQuo = p => p.kind === "const" ? p.rules.constQuorumPct : p.rules.quorumPct;
 
@@ -152,7 +158,7 @@ async function viewHome() {
     <label>Porteur<select id="f-author" data-f="author"><option value="">Tous</option>${data.facets.authors.map(a => `<option value="${esc(a)}" ${f.author === a ? "selected" : ""}>@${esc(a)}</option>`).join("")}</select></label>
     <label>Déposée après<input type="date" id="f-from" data-f="from" value="${esc(f.from)}"></label>
     <label>Déposée avant<input type="date" id="f-to" data-f="to" value="${esc(f.to)}"></label>
-    <label>Trier par<select id="f-sort" data-f="sort">${[["avance", "Les plus avancées"], ["recent", "Les plus récentes"], ["ancien", "Les plus anciennes"], ["echeance", "Échéance la plus proche"], ["contrib", "Les plus débattues"], ["parrains", "Le plus de parrains"], ["titre", "Titre (A → Z)"]].map(([v, l]) => `<option value="${v}" ${f.sort === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+    <label>Trier par<select id="f-sort" data-f="sort">${[["avance", "Les plus avancées"], ["recent", "Les plus récentes"], ["ancien", "Les plus anciennes"], ["echeance", "Échéance la plus proche"], ["contrib", "Les plus débattues"], ["parrains", "Le plus de parrains"], ["avis", "Les plus appréciées"], ["titre", "Titre (A → Z)"]].map(([v, l]) => `<option value="${v}" ${f.sort === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
   </div>
   ${data.facets.tags.length ? `<div class="tagcloud"><span class="lbl">Tags</span>${data.facets.tags.slice(0, 16).map(([t, n]) => `<button class="tagbtn" data-act="tagf" data-t="${esc(t)}" aria-pressed="${f.tag === t}">#${esc(t)}<span class="c">${n}</span></button>`).join("")}</div>` : ""}` : ""}
   <div class="active-filters" id="active">${activeHtml(data)}</div>
@@ -216,6 +222,11 @@ function cardFoot(p) {
   const ok = r.outcome === "adopted";
   return `<span style="color:${ok ? "var(--pour)" : "var(--contre)"};font-weight:700">${ok ? "Adoptée" : "Rejetée"}</span><span class="mono">${n_(r.pourPct ?? 0)} % pour</span>`;
 }
+function avisMini(p) {
+  const a = p.avis; if (!a || !(a.pour + a.contre)) return "";
+  return `<span class="avis-mini" role="img" aria-label="${plural(a.pour, "avis favorable", "avis favorables")}, ${plural(a.contre, "défavorable")}">
+    <span class="up">${thumb("up")}${fmtN(a.pour)}</span>${avisBar(a.pour, a.contre)}<span class="down">${thumb("down")}${fmtN(a.contre)}</span></span>`;
+}
 function cardHtml(p) {
   let target = "";
   if (p.targetTitle) target = `<span class="target">${p.kind === "modif" ? "Modifie" : "Abroge"} : <b>${esc(p.targetTitle)}</b></span>`;
@@ -223,7 +234,7 @@ function cardHtml(p) {
   return `<a class="card" href="#/p/${p.id}" style="color:inherit;text-decoration:none">
     <span class="chips">${chipsHtml(p, false)}</span>
     <span class="ttl">${esc(p.title)}</span>${target}
-    <span class="sum">${esc(p.summary)}</span>
+    <span class="sum">${esc(p.summary)}</span>${avisMini(p)}
     <span class="meta">${avatar(p.author.pseudo)}<span>@${esc(p.author.pseudo)}</span>${p.author.minor ? '<span class="minor">-18</span>' : ""}<span>· ${fmtDs(p.dates.projet)}</span><span>· v${p.versionsCount}</span><span>· ${plural(p.notesCount, "contribution")}</span>${p.attCount ? `<span>· ${plural(p.attCount, "pièce")}</span>` : ""}</span>
     <span class="card-foot" style="--c:${cvar(PH[p.phase].c)}">${cardFoot(p)}</span></a>`;
 }
@@ -259,6 +270,28 @@ function maskedHtml(d) {
     ${me() ? delVoteBtn("proposal", d.id, d.deletion, d.isAuthor) : `<a class="btn small" href="#/connexion" style="text-decoration:none">Se connecter pour voter</a>`}
   </div>`;
 }
+/** Avis favorable / défavorable des inscrits : deux gros boutons à compteur et la répartition en barre. */
+function avisHtml(d) {
+  const a = d.avis; if (!a) return "";
+  const can = a.open && me() && !d.isAuthor, off = needsVerify() || suspended();
+  const t = (a.pour || 0) + (a.contre || 0);
+  const btn = (v, k, label, n) => can
+    ? `<button class="avis-btn ${k}" data-act="avis" data-v="${v}" aria-pressed="${a.mine === v}" ${off ? "disabled" : ""}>${thumb(k)}<span class="l">${label}</span><span class="n">${a.hidden ? "–" : fmtN(n)}</span></button>`
+    : `<span class="avis-btn ${k}">${thumb(k)}<span class="l">${label}</span><span class="n">${a.hidden ? "–" : fmtN(n)}</span></span>`;
+  const meter = a.hidden ? `<p class="avis-note">Compteurs masqués pendant le vote officiel, pour ne pas l'influencer. Ils réapparaissent à la clôture.</p>`
+    : !t ? `<p class="avis-note">Aucun avis pour l'instant.${can ? " Donne le premier !" : ""}</p>`
+    : `<div class="avis-meter" role="img" aria-label="${n_(pct(a.pour, t))} % favorables, ${n_(pct(a.contre, t))} % défavorables, sur ${plural(t, "avis", "avis")}">${avisBar(a.pour, a.contre)}
+        <div class="avis-legend"><span class="up">${n_(pct(a.pour, t))} % favorables</span><span class="muted">${plural(t, "avis", "avis")}</span><span class="down">${n_(pct(a.contre, t))} % défavorables</span></div></div>`;
+  const hint = !me() && a.open ? `<a href="#/connexion" data-act="login-then">Connecte-toi</a> pour donner ton avis. `
+    : d.isAuthor && a.open ? "C'est ta proposition : les autres inscrits donnent leur avis. "
+    : !a.open && !a.hidden ? "Les avis sont clos. " : "";
+  return `<section class="section avis" aria-label="Avis des inscrits">
+    <h2><span>Avis des inscrits</span>${a.mine ? `<span>ton avis : ${a.mine > 0 ? "favorable" : "défavorable"}</span>` : ""}</h2>
+    <div class="avis-btns">${btn(1, "up", "Favorable", a.pour)}${btn(-1, "down", "Défavorable", a.contre)}</div>
+    ${meter}
+    <p class="avis-note">${hint}Un avis donne la tendance, ce n'est pas un vote : seul le vote officiel décide.</p>
+  </section>`;
+}
 function detailHtml(d) {
   if (d.masked) return maskedHtml(d);
   const tagEdit = UI.editingTags && d.isAuthor;
@@ -279,6 +312,7 @@ function detailHtml(d) {
       <div class="meta" style="margin-bottom:20px">${avatar(d.author.pseudo)}<span>Portée par ${userLink(d.author.pseudo)}</span>${d.author.minor ? '<span class="minor">-18</span>' : ""}<span>· déposée le ${fmtD(d.dates.projet)}</span>
         ${d.fork ? `<span>· variante de <a href="#/p/${d.fork.id}">${esc(d.fork.title)}</a></span>` : ""}
         ${d.lawId ? `<span>· devenue <a href="#/loi/${d.lawId}">une loi</a></span>` : ""}</div>
+      ${avisHtml(d)}
       ${textSections(d)}
       ${historyHtml(d)}
       ${d.files.length || d.links.length ? `<section class="section"><h2>Pièces jointes et sources</h2><div class="att">
@@ -949,6 +983,11 @@ document.addEventListener("click", async e => {
     case "vote": {
       const v = el.dataset.v, choice = d.myVote === v ? null : v;
       if (await act(() => api("POST", `/api/proposals/${d.id}/vote`, { choice }), choice ? "Vote enregistré. Tu peux le changer jusqu'à la clôture." : "Vote retiré.")) rerender();
+      return;
+    }
+    case "avis": {
+      const v = Number(el.dataset.v), value = d.avis.mine === v ? 0 : v;
+      if (await act(() => api("POST", `/api/proposals/${d.id}/avis`, { value }), !value ? "Avis retiré." : value > 0 ? "Avis favorable enregistré." : "Avis défavorable enregistré.")) rerender();
       return;
     }
     case "decide":

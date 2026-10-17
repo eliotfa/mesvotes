@@ -43,6 +43,8 @@ Les phases avancent toutes seules : une horloge interne vérifie les échéances
 - **Abrogation** d'une loi adoptée : adoptée, la loi reste consultable mais n'est plus en vigueur.
 - **Révision de la Constitution** : changer une règle chiffrée ou un texte de principe. Majorité renforcée (plus de 60 %, 10 % de participation). Si deux révisions se chevauchent, seules les règles touchées par chacune s'appliquent, comme une fusion de branches git.
 
+**Avis favorable / défavorable :** tout inscrit (sauf le porteur) peut donner un avis 👍 ou 👎 sur une proposition, un seul et modifiable, pendant les phases Projet, Parrainage et Délibération. Les compteurs et la répartition s'affichent sur la proposition et dans la liste (tri « Les plus appréciées »). Un avis donne la tendance, ce n'est pas un vote : pendant le vote officiel, les avis sont fermés et leurs compteurs cachés pour ne pas l'influencer, puis ils réapparaissent à la clôture.
+
 **Et aussi :** tags et thèmes, recherche et filtres (type, phase, thème, tag, porteur, dates, tri), fichiers joints et liens, variantes (reprendre la proposition de quelqu'un d'autre), cahier « Présidentielle 2027 », votes des mineurs comptés et affichés aussi à part.
 
 **Modération citoyenne :** ce sont les inscrits qui modèrent.
@@ -248,6 +250,7 @@ La Constitution, le calcul des différences et le filtre de modération sont éc
 | `POST` | `/api/proposals` | Déposer une proposition |
 | `GET` | `/api/proposals/:id` | Détail complet (versions, débat, résultats) |
 | `POST` | `/api/proposals/:id/versions` · `notes` · `parrainage` · `vote` | Participer |
+| `POST` | `/api/proposals/:id/avis` | Avis : `value` à `1` (favorable), `-1` (défavorable) ou `0` (retirer) |
 | `PATCH` | `/api/proposals/:id/meta` | Thèmes et tags (porteur, phase Projet) |
 | `POST` | `/api/notes/:id/decision` | Intégrer ou refuser un amendement |
 | `POST` | `/api/reports` | Signaler (`type` : `note`, `proposal` ou `user`, `id`, `reason`, `comment`) |

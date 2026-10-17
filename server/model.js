@@ -94,6 +94,16 @@ export function deletionState(viewer, type, id) {
   return { votes, threshold: cstNow().params.modDelVotes, mine };
 }
 
+/* Avis favorable / défavorable : une tendance, pas un vote. Ouvert tant que le texte est débattu ;
+   pendant le vote officiel, fermé et compteurs cachés (comme les résultats) pour ne pas l'influencer. */
+export const AVIS_PHASES = ["projet", "parrainage", "deliberation"];
+export function avisState(p, viewerId = -1) {
+  const hidden = p.phase === "vote";
+  const c = q("SELECT COALESCE(SUM(value=1),0) pour, COALESCE(SUM(value=-1),0) contre FROM opinions WHERE proposal_id=?").get(p.id);
+  const mine = q("SELECT value FROM opinions WHERE proposal_id=? AND user_id=?").get(p.id, viewerId)?.value || 0;
+  return { pour: hidden ? null : c.pour, contre: hidden ? null : c.contre, mine, hidden, open: AVIS_PHASES.includes(p.phase) };
+}
+
 export function proposalDetail(id, viewer) {
   const p = getProposal(id);
   if (!p) return null;
@@ -120,6 +130,7 @@ export function proposalDetail(id, viewer) {
     parrains: q("SELECT COUNT(*) c FROM parrainages WHERE proposal_id=?").get(p.id).c,
     myParrain: !!q("SELECT 1 x FROM parrainages WHERE proposal_id=? AND user_id=?").get(p.id, vid),
     participation: participation(p.id),
+    avis: avisState(p, vid),
     myVote: q("SELECT choice FROM votes WHERE proposal_id=? AND user_id=?").get(p.id, vid)?.choice || null,
     threshold: threshold(p, el), phaseEnd: phaseEnd(p), electorate: el,
     law: p.target ? lawFull(p.target.lawId) : null,
@@ -138,6 +149,7 @@ export function proposalSummaries(viewer) {
   const nNotes = count("SELECT proposal_id id, COUNT(*) c FROM notes WHERE hidden<2 GROUP BY proposal_id");
   const nParr = count("SELECT proposal_id id, COUNT(*) c FROM parrainages GROUP BY proposal_id");
   const nVotes = count("SELECT proposal_id id, COUNT(*) c FROM votes GROUP BY proposal_id");
+  const avis = Object.fromEntries(q("SELECT proposal_id id, SUM(value=1) pour, SUM(value=-1) contre FROM opinions GROUP BY proposal_id").all().map(r => [r.id, r]));
   const last = Object.fromEntries(q(`SELECT pv.proposal_id id, pv.text, pv.cst FROM proposal_versions pv
      JOIN (SELECT proposal_id, MAX(n) m FROM proposal_versions GROUP BY proposal_id) x ON x.proposal_id=pv.proposal_id AND pv.n=x.m`).all().map(r => [r.id, r]));
   const laws = Object.fromEntries(q("SELECT id, title FROM laws").all().map(l => [l.id, l.title]));
@@ -153,6 +165,7 @@ export function proposalSummaries(viewer) {
       phase: p.phase, dates: p.dates, hidden: p.hidden, versionsCount: nVersions[p.id] || 0, notesCount: nNotes[p.id] || 0,
       attCount: p.files.length + p.links.length, parrains: nParr[p.id] || 0, threshold: threshold(p, el), phaseEnd: phaseEnd(p),
       participation: nVotes[p.id] || 0, targetTitle: lawTitle, forkOf: p.forkOf,
+      avis: p.phase === "vote" ? null : { pour: avis[p.id]?.pour || 0, contre: avis[p.id]?.contre || 0 },
       result: p.result ? { outcome: p.result.outcome, pourPct: p.result.pourPct } : null
     };
     if (p.kind === "const" && p.constBase && lv.cst) s.constChanges = paramChanges(p.constBase, normalizeCst(J(lv.cst)));
