@@ -21,8 +21,8 @@ const clone = o => JSON.parse(JSON.stringify(o));
 
 /* ---------- état ---------- */
 let BOOT = null;
-const F0 = () => ({ q: "", kind: "", phase: "", theme: "", tag: "", author: "", from: "", to: "", only27: false, mine: false, sort: "avance" });
-const UI = { f: F0(), showFilters: true, noteType: "comment", editing: false, editingTags: false, openVer: null, lawQ: "", lawStatus: "", newKind: "loi", prefill: null, after: "#/" };
+const F0 = () => ({ q: "", kind: "", phase: "", theme: "", tag: "", code: "", author: "", from: "", to: "", only27: false, mine: false, sort: "avance" });
+const UI = { f: F0(), showFilters: true, noteType: "comment", editing: false, editingTags: false, openVer: null, lawQ: "", lawStatus: "", lawCode: "", newKind: "loi", prefill: null, after: "#/", codeForm: null };
 let VIEW = null; // { name, data }
 const me = () => BOOT && BOOT.me;
 const cstNow = () => BOOT.constitution[BOOT.constitution.length - 1];
@@ -31,6 +31,9 @@ const isAdmin = () => me() && me().role === "admin";
 const needsVerify = () => BOOT.mailEnabled && me() && !me().emailVerified;
 const suspended = () => me() && me().suspendedUntil > Date.now();
 const userLink = p => `<a class="ulink" href="#/u/${encodeURIComponent(p)}">@${esc(p)}</a>`;
+const codeOf = id => (BOOT.codes || []).find(c => c.id === id) || null;
+const codeChip = c => c ? `<a class="tag code" href="#/code/${c.id}">${esc(c.name)}</a>` : "";
+const codeSelect = (id, sel) => `<label class="f">Code <small>Facultatif. Range le texte avec d'autres sur le même sujet, comme « Code du travail ». <a href="#/codes">Voir ou proposer un code</a></small><select id="${id}"><option value="">Aucun</option>${(BOOT.codes || []).map(c => `<option value="${c.id}" ${c.id === sel ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></label>`;
 const REASON_LABEL = Object.fromEntries(REPORT_REASONS);
 const TYPE_LABEL = { note: "Contribution", proposal: "Proposition", user: "Compte" };
 const actionLabel = (type, id) => (actionsFor(type).find(a => a.id === id) || MOD_ACTIONS.find(a => a.id === id) || { label: id }).label;
@@ -80,10 +83,10 @@ const needQuo = p => p.kind === "const" ? p.rules.constQuorumPct : p.rules.quoru
 
 /* ---------- en-tête ---------- */
 function renderHeader() {
-  const nav = [["#/", "Propositions", "home"], ["#/lois", "Lois", "laws"], ["#/constitution", "Constitution", "const"], ["#/2027", "2027", "y2027"], ["#/comment", "Comment ça marche", "how"]];
+  const nav = [["#/", "Propositions", "home"], ["#/lois", "Lois", "laws"], ["#/codes", "Codes", "codes"], ["#/constitution", "Constitution", "const"], ["#/2027", "2027", "y2027"], ["#/comment", "Comment ça marche", "how"]];
   nav.push(["#/moderation", `Modération${me()?.duties ? ` <span class="badge">${me().duties}</span>` : ""}`, "mod"]);
   if (isAdmin()) nav.push(["#/admin", "Admin", "admin"]);
-  const cur = VIEW ? ({ detail: "home", new: "home", law: "laws", case: "mod" }[VIEW.name] || VIEW.name) : "";
+  const cur = VIEW ? ({ detail: "home", new: "home", law: "laws", case: "mod", code: "codes" }[VIEW.name] || VIEW.name) : "";
   const u = me();
   $("#top").innerHTML = `<div class="wrap">
     <a class="brand" href="#/" aria-label="mesvotes.fr, accueil" style="text-decoration:none;color:inherit">
@@ -109,7 +112,7 @@ function renderHeader() {
 /* ---------- accueil ---------- */
 function filterQuery() {
   const f = UI.f, P = new URLSearchParams();
-  for (const k of ["q", "kind", "phase", "theme", "tag", "author", "from", "to", "sort"]) if (f[k]) P.set(k, f[k]);
+  for (const k of ["q", "kind", "phase", "theme", "tag", "code", "author", "from", "to", "sort"]) if (f[k]) P.set(k, f[k]);
   if (f.only27) P.set("only27", "1"); if (f.mine) P.set("mine", "1");
   return P.toString();
 }
@@ -148,6 +151,7 @@ async function viewHome() {
     <label>Type<select id="f-kind" data-f="kind"><option value="">Tous</option>${Object.entries(KINDS).map(([k, v]) => `<option value="${k}" ${f.kind === k ? "selected" : ""}>${v.label}</option>`).join("")}</select></label>
     <label>Phase<select id="f-phase" data-f="phase"><option value="">Toutes</option>${PHASES.map(p => `<option value="${p.id}" ${f.phase === p.id ? "selected" : ""}>${p.name}</option>`).join("")}</select></label>
     <label>Thème<select id="f-theme" data-f="theme"><option value="">Tous</option>${THEMES.map(t => `<option ${f.theme === t ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+    ${BOOT.codes?.length ? `<label>Code<select id="f-code" data-f="code"><option value="">Tous</option>${BOOT.codes.map(c => `<option value="${c.id}" ${f.code === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></label>` : ""}
     <label>Tag<select id="f-tag" data-f="tag"><option value="">Tous</option>${data.facets.tags.map(([t, n]) => `<option value="${esc(t)}" ${f.tag === t ? "selected" : ""}>#${esc(t)} (${n})</option>`).join("")}</select></label>
     <label>Porteur<select id="f-author" data-f="author"><option value="">Tous</option>${data.facets.authors.map(a => `<option value="${esc(a)}" ${f.author === a ? "selected" : ""}>@${esc(a)}</option>`).join("")}</select></label>
     <label>Déposée après<input type="date" id="f-from" data-f="from" value="${esc(f.from)}"></label>
@@ -182,6 +186,7 @@ function activeFilters() {
   if (f.phase) out.push(["phase", "Phase", PH[f.phase].name]);
   if (f.theme) out.push(["theme", "Thème", f.theme]);
   if (f.tag) out.push(["tag", "Tag", "#" + f.tag]);
+  if (f.code) out.push(["code", "Code", codeOf(f.code)?.name || "supprimé"]);
   if (f.author) out.push(["author", "Porteur", "@" + f.author]);
   if (f.from) out.push(["from", "Déposée après", fmtD(new Date(f.from + "T12:00"))]);
   if (f.to) out.push(["to", "Déposée avant", fmtD(new Date(f.to + "T12:00"))]);
@@ -203,7 +208,8 @@ function chipsHtml(p, interactive) {
   const t = interactive
     ? p.themes.map(x => `<button class="tag theme" data-act="gofilter" data-k="theme" data-val="${esc(x)}">${esc(x)}</button>`).join("") + p.tags.map(x => `<button class="tag" data-act="gofilter" data-k="tag" data-val="${esc(x)}">#${esc(x)}</button>`).join("")
     : p.themes.map(x => `<span class="tag theme">${esc(x)}</span>`).join("") + p.tags.map(x => `<span class="tag">#${esc(x)}</span>`).join("");
-  return `${kindChip(p.kind)}${phaseChip(p)}${p.is2027 ? '<span class="tag y27">2027</span>' : ""}${p.hidden ? '<span class="pill warn">masquée</span>' : ""}${t}`;
+  const code = !p.code ? "" : interactive ? codeChip(p.code) : `<span class="tag code">${esc(p.code.name)}</span>`;
+  return `${kindChip(p.kind)}${phaseChip(p)}${p.is2027 ? '<span class="tag y27">2027</span>' : ""}${p.hidden ? '<span class="pill warn">masquée</span>' : ""}${code}${t}`;
 }
 function cardFoot(p) {
   const c = cvar(PH[p.phase].c);
@@ -268,9 +274,10 @@ function detailHtml(d) {
   ${d.underReview && !d.hidden ? `<div class="notice">Cette proposition a été signalée : un jury citoyen tiré au sort l'examine. Elle reste visible pendant l'examen.</div>` : ""}
   <div class="detail">
     <div>
-      <div class="chips">${chipsHtml(d, true)}${d.phase === "projet" && d.isAuthor && !tagEdit ? `<button class="btn small ghost" data-act="edit-tags">Gérer thèmes et tags</button>` : ""}</div>
+      <div class="chips">${chipsHtml(d, true)}${d.phase === "projet" && d.isAuthor && !tagEdit ? `<button class="btn small ghost" data-act="edit-tags">Gérer code, thèmes et tags</button>` : ""}</div>
       ${tagEdit ? `<form class="stack" data-form="tags" style="margin-top:12px;max-width:600px">
         ${d.kind === "const" ? "" : `<div class="f">Thèmes<div class="checks">${THEMES.filter(t => t !== "Constitution").map(t => `<label><input type="checkbox" name="theme" value="${t}" ${d.themes.includes(t) ? "checked" : ""}> ${t}</label>`).join("")}</div></div>`}
+        ${d.kind === "const" ? "" : codeSelect("t-code", d.codeId)}
         <label class="f">Tags <small>6 maximum, séparés par des virgules ou des espaces.</small><input type="text" id="t-tags" value="${esc(d.tags.join(", "))}"></label>
         <div class="form-msg"></div>
         <div class="btnrow"><button class="btn primary small" type="submit">Enregistrer</button><button class="btn ghost small" type="button" data-act="cancel-tags">Annuler</button></div></form>` : ""}
@@ -312,7 +319,9 @@ function textSections(d) {
     const l = d.law, lv = l.versions.length, lt = l.versions[lv - 1].text, df = diffView(d.phase === "fin" ? (l.versions[d.target.base - 1] || l.versions[0]).text : lt, text);
     const warn = d.phase === "fin" ? "" : l.status !== "vigueur" ? `<div class="conflict">Cette loi a été abrogée depuis. La modification ne pourra pas s'appliquer.</div>` :
       lv !== d.target.base ? `<div class="conflict">La loi a changé depuis le dépôt (v${d.target.base} → v${lv}). Les différences sont calculées sur la version en vigueur. En cas d'adoption, ce texte remplacera la v${lv}.</div>` : "";
-    return `<section class="section"><h2><span>Ce qui change dans la loi</span>${diffStat(df)}</h2>${warn}
+    const recode = d.phase !== "fin" && (d.law.codeId || null) !== (d.codeId || null)
+      ? `<p style="margin:0 0 10px;font-size:14px">Range aussi la loi dans un autre code : <b>${esc(codeOf(d.law.codeId)?.name || "aucun")}</b> → <b>${esc(d.code?.name || "aucun")}</b>.</p>` : "";
+    return `<section class="section"><h2><span>Ce qui change dans la loi</span>${diffStat(df)}</h2>${warn}${recode}
       <p style="margin:0 0 10px;font-size:14px">Par rapport à <a href="#/loi/${l.id}">${esc(l.title)}</a> (v${d.phase === "fin" ? d.target.base : lv}).</p><div class="diff">${df.html}</div></section>
       <section class="section"><h2><span>Texte proposé · version ${d.versions.length}</span>${editBtn}</h2>${editing ? editForm(d) : numbered(text)}</section>`;
   }
@@ -450,17 +459,18 @@ async function viewLaws() {
   return `<div class="page-head"><h1>Le recueil des lois</h1><p>Toutes les lois adoptées par vote. Chacune garde l'historique complet de ses versions, et peut être modifiée ou abrogée par une nouvelle proposition.</p></div>
   <div class="toolbar">
     <input class="search" id="lq" type="search" placeholder="Chercher une loi…" value="${esc(UI.lawQ)}" aria-label="Chercher une loi">
+    ${BOOT.codes?.length ? `<select id="lcode" style="width:auto" aria-label="Code"><option value="">Tous les codes</option>${BOOT.codes.map(c => `<option value="${c.id}" ${UI.lawCode === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>` : ""}
     <select id="lstatus" style="width:auto" aria-label="Statut"><option value="">Toutes</option><option value="vigueur" ${UI.lawStatus === "vigueur" ? "selected" : ""}>En vigueur</option><option value="abrogée" ${UI.lawStatus === "abrogée" ? "selected" : ""}>Abrogées</option></select>
   </div>
   <div class="list" id="lawlist">${lawCards()}</div>`;
 }
 function lawCards() {
   const qn = UI.lawQ.trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
-  const L = VIEW.data.items.filter(l => (!UI.lawStatus || l.status === UI.lawStatus) && (!qn || [l.title, l.versions[l.versions.length - 1].text, ...l.tags, ...l.themes].join(" ").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").includes(qn)))
+  const L = VIEW.data.items.filter(l => (!UI.lawStatus || l.status === UI.lawStatus) && (!UI.lawCode || l.codeId === UI.lawCode) && (!qn || [l.title, l.versions[l.versions.length - 1].text, ...l.tags, ...l.themes].join(" ").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").includes(qn)))
     .sort((a, b) => b.versions[b.versions.length - 1].date - a.versions[a.versions.length - 1].date);
   return L.map(l => { const lv = l.versions[l.versions.length - 1];
     return `<a class="card" href="#/loi/${l.id}" style="color:inherit;text-decoration:none">
-      <span class="chips"><span class="status-chip ${l.status === "vigueur" ? "" : "off"}">${l.status === "vigueur" ? "En vigueur" : "Abrogée"}</span>${l.themes.map(t => `<span class="tag theme">${esc(t)}</span>`).join("")}${l.tags.map(t => `<span class="tag">#${esc(t)}</span>`).join("")}</span>
+      <span class="chips"><span class="status-chip ${l.status === "vigueur" ? "" : "off"}">${l.status === "vigueur" ? "En vigueur" : "Abrogée"}</span>${codeOf(l.codeId) ? `<span class="tag code">${esc(codeOf(l.codeId).name)}</span>` : ""}${l.themes.map(t => `<span class="tag theme">${esc(t)}</span>`).join("")}${l.tags.map(t => `<span class="tag">#${esc(t)}</span>`).join("")}</span>
       <span class="ttl">${esc(l.title)}</span><span class="sum">${esc(paras(lv.text)[0] || "")}</span>
       <span class="card-foot"><span>Version ${l.versions.length} · ${fmtD(lv.date)}</span><span class="mono">${l.pending ? `${plural(l.pending, "proposition")} en cours` : ""}</span></span></a>`; }).join("")
     || `<div class="empty">${VIEW.data.items.length ? "Aucune loi ne correspond." : "Aucune loi adoptée pour l'instant. La première viendra d'une proposition votée."}</div>`;
@@ -471,7 +481,7 @@ async function viewLaw(id) {
   const lt = l.versions[l.versions.length - 1].text;
   return `<a class="btn ghost small back" href="#/lois" style="text-decoration:none">← Le recueil des lois</a>
   <div class="cols"><div>
-    <div class="chips"><span class="status-chip ${l.status === "vigueur" ? "" : "off"}">${l.status === "vigueur" ? "En vigueur" : "Abrogée"}</span>${l.themes.map(t => `<span class="tag theme">${esc(t)}</span>`).join("")}${l.tags.map(t => `<span class="tag">#${esc(t)}</span>`).join("")}</div>
+    <div class="chips"><span class="status-chip ${l.status === "vigueur" ? "" : "off"}">${l.status === "vigueur" ? "En vigueur" : "Abrogée"}</span>${codeChip(codeOf(l.codeId))}${l.themes.map(t => `<span class="tag theme">${esc(t)}</span>`).join("")}${l.tags.map(t => `<span class="tag">#${esc(t)}</span>`).join("")}</div>
     <h1 class="dtitle" style="margin-bottom:18px">${esc(l.title)}</h1>
     <section class="section"><h2><span>Texte ${l.status === "vigueur" ? "en vigueur" : "au moment de l'abrogation"} · version ${l.versions.length}</span></h2>${numbered(lt, l.status !== "vigueur")}</section>
     <section class="section"><h2><span>Historique · ${plural(l.versions.length, "version")}</span></h2><ul class="hist">${l.versions.slice().reverse().map(v => {
@@ -483,6 +493,74 @@ async function viewLaw(id) {
       ${l.status === "vigueur" ? `<div class="btnrow"><a class="btn primary" href="#/proposer/modif/${l.id}" style="text-decoration:none">Proposer une modification</a><a class="btn" href="#/proposer/abrog/${l.id}" style="text-decoration:none;color:inherit">Proposer l'abrogation</a></div>` : `<p style="margin:0">Cette loi est abrogée. Pour la rétablir, dépose une nouvelle loi.</p>`}</div>
     <div class="section"><h2>Propositions liées · ${l.related.length}</h2>${l.related.length ? `<ul class="mini">${l.related.map(p => `<li><a class="minilink" href="#/p/${p.id}"><span class="t">${esc(p.title)}</span> <span class="meta">${kindChip(p.kind)}${phaseChip(p)}</span></a></li>`).join("")}</ul>` : `<p class="muted" style="margin:0;font-size:14px">Aucune.</p>`}</div>
   </aside></div>`;
+}
+
+/* ---------- codes ---------- */
+const REQ_LABEL = { create: "Créer", modify: "Modifier", delete: "Supprimer" };
+function codeRequestHtml(r) {
+  const target = r.action === "create" ? `« ${esc(r.name)} »` : r.code ? `<a href="#/code/${r.code.id}">« ${esc(r.code.name)} »</a>` : "un code supprimé";
+  const change = r.action === "create" ? (r.description ? `<p style="margin:6px 0 0">${esc(r.description)}</p>` : "")
+    : r.action === "modify" ? `<p style="margin:6px 0 0">Nouveau nom : <b>${esc(r.name)}</b>${r.description ? ` · description : ${esc(r.description)}` : ""}</p>` : "";
+  const open = r.status === "open", res = r.result;
+  const vote = !open ? "" : !me() ? `<a class="btn small" href="#/connexion" data-act="login-then" style="text-decoration:none">Se connecter pour voter</a>`
+    : `<div class="votebtns row" role="group" aria-label="Ton vote">${[["p", "Pour", "--pour"], ["c", "Contre", "--contre"]].map(([k, l, cv]) => `<button class="vbtn" style="--c:var(${cv})" data-act="code-vote" data-r="${r.id}" data-v="${k}" aria-pressed="${r.myVote === k}" ${needsVerify() ? "disabled" : ""}><span>${l}</span><span class="box">${r.myVote === k ? "✓" : ""}</span></button>`).join("")}</div>`;
+  return `<div class="queue-item">
+    <div class="meta"><span class="pill${r.action === "delete" ? " warn" : ""}">${REQ_LABEL[r.action]}</span><strong style="color:var(--ink)">${target}</strong><span>· demandé par ${userLink(r.author)}</span>
+      <span>· ${open ? `clôture le ${fmtD(r.endsAt)} (J-${daysLeft(r.endsAt)}), ${plural(r.participation, "votant")}` : `${r.status === "adopted" ? "adoptée" : "rejetée"} le ${fmtD(res.closedAt)} · ${res.pour} pour, ${res.contre} contre`}</span></div>
+    ${change}<blockquote>${esc(r.reason)}</blockquote>
+    ${open ? vote : res?.note ? `<p class="muted" style="margin:6px 0 0;font-size:13px">${esc(res.note)}</p>` : ""}
+    ${open && BOOT.demoMode && isAdmin() ? `<button class="btn ink small" style="margin-top:10px" data-act="code-advance" data-r="${r.id}">Démo · clore le vote maintenant</button>` : ""}</div>`;
+}
+function codeReqForm(action, code) {
+  const named = action !== "delete";
+  return `<form class="stack" data-form="code-req" data-action="${action}" data-code="${code ? code.id : ""}" style="max-width:640px">
+    ${named ? `<label class="f">Nom <small>3 à 60 caractères.</small><input type="text" id="cr-name" required minlength="3" maxlength="60" value="${esc(code ? code.name : "")}" placeholder="Ex. : Code du travail"></label>
+      <label class="f">Description <small>Facultative, 280 caractères. Ce que le code réunit.</small><textarea id="cr-desc" rows="2" maxlength="280">${esc(code ? code.description : "")}</textarea></label>` : ""}
+    <label class="f">${action === "delete" ? "Pourquoi le supprimer" : "Pourquoi ce changement"} <small>Visible par tous les votants.</small><textarea id="cr-reason" rows="2" required minlength="5" maxlength="500"></textarea></label>
+    <div class="form-msg"></div>
+    <div class="btnrow"><button class="btn primary small" type="submit" ${needsVerify() ? "disabled" : ""}>Soumettre au vote</button><button class="btn ghost small" type="button" data-act="code-form" data-v="${action}">Annuler</button></div></form>`;
+}
+const codeRules = () => { const r = cstNow().params; return `Chaque demande est soumise au vote des inscrits pendant ${plural(r.codeDays, "jour")}. Elle passe avec plus de ${n_(r.majorityPct)} % de « pour » et au moins ${plural(r.codeMinVotes, "vote")} (Constitution, art. 11).`; };
+async function viewCodes() {
+  const data = await api("GET", "/api/codes"); VIEW = { name: "codes", data };
+  const rq = data.requests;
+  return `<div class="page-head"><h1>Les codes</h1><p>Un code réunit sous un même nom les lois et les propositions d'un sujet, comme « Code du travail ». Ce sont les inscrits qui décident de créer, renommer ou supprimer un code. ${codeRules()}</p></div>
+  <div class="cols"><div>
+    <div class="list">${data.items.map(c => `<a class="card" href="#/code/${c.id}" style="color:inherit;text-decoration:none">
+      <span class="ttl">${esc(c.name)}</span>${c.description ? `<span class="sum">${esc(c.description)}</span>` : ""}
+      <span class="card-foot"><span>${plural(c.laws, "loi")} en vigueur</span><span class="mono">${plural(c.proposals, "proposition")} en cours</span></span></a>`).join("")
+      || `<div class="empty">Aucun code pour l'instant. Propose le premier.</div>`}</div>
+    <section class="section" style="margin-top:20px"><h2>Demandes en cours de vote · ${rq.open.length}</h2>${rq.open.map(codeRequestHtml).join("") || `<p class="muted" style="margin:0;font-size:14px">Aucune.</p>`}</section>
+    ${rq.closed.length ? `<section class="section"><h2>Décisions récentes · ${rq.closed.length}</h2>${rq.closed.map(codeRequestHtml).join("")}</section>` : ""}
+  </div>
+  <aside class="side"><div class="section action"><h3>Proposer un code</h3>
+    ${!me() ? `<p>Il faut un compte pour proposer un code.</p><a class="btn primary" href="#/connexion" data-act="login-then" style="text-decoration:none">Se connecter</a>`
+      : UI.codeForm === "create" ? codeReqForm("create", null) : `<p>Un nom, une courte description, et la communauté vote.</p><button class="btn primary" data-act="code-form" data-v="create">Proposer un nouveau code</button>`}
+  </div></aside></div>`;
+}
+async function viewCode(id) {
+  const c = await api("GET", "/api/codes/" + encodeURIComponent(id)); VIEW = { name: "code", data: c };
+  const active = c.status === "actif", busy = c.requests.open.length > 0;
+  return `<a class="btn ghost small back" href="#/codes" style="text-decoration:none">← Les codes</a>
+  <div class="page-head"><h1>${esc(c.name)}</h1>${c.description ? `<p>${esc(c.description)}</p>` : ""}
+    <div class="chips">${active ? `<span class="status-chip">En vigueur</span>` : `<span class="status-chip off">Supprimé</span>`}<span class="muted" style="font-size:14px">créé le ${fmtD(c.createdAt)} par un vote des inscrits</span></div></div>
+  ${active ? "" : `<div class="notice warn">Ce code a été supprimé par un vote. Ses lois et propositions restent consultables, sans code.</div>`}
+  <div class="cols"><div>
+    ${active ? `<h2 class="h-sec">Lois en vigueur · ${c.laws.filter(l => l.status === "vigueur").length}</h2>
+    <div class="list">${c.laws.map(l => `<a class="card" href="#/loi/${l.id}" style="color:inherit;text-decoration:none">
+      <span class="chips"><span class="status-chip ${l.status === "vigueur" ? "" : "off"}">${l.status === "vigueur" ? "En vigueur" : "Abrogée"}</span>${l.themes.map(t => `<span class="tag theme">${esc(t)}</span>`).join("")}</span>
+      <span class="ttl">${esc(l.title)}</span><span class="sum">${esc(l.excerpt)}</span><span class="card-foot"><span>Version ${l.version} · ${fmtD(l.date)}</span></span></a>`).join("") || `<div class="empty">Aucune loi dans ce code pour l'instant.</div>`}</div>
+    <h2 class="h-sec">Propositions en cours · ${c.proposals.length}</h2>
+    <div class="list">${c.proposals.map(cardHtml).join("") || `<div class="empty">Aucune proposition en cours. Le porteur d'une proposition choisit son code au dépôt.</div>`}</div>` : ""}
+    <section class="section" style="margin-top:20px"><h2>Demandes sur ce code · ${c.requests.open.length + c.requests.closed.length}</h2>${[...c.requests.open, ...c.requests.closed].map(codeRequestHtml).join("") || `<p class="muted" style="margin:0;font-size:14px">Aucune.</p>`}</section>
+  </div>
+  <aside class="side">${active ? `<div class="section action"><h3>Faire évoluer ce code</h3><p>${codeRules()}</p>
+    ${!me() ? `<a class="btn primary" href="#/connexion" data-act="login-then" style="text-decoration:none">Se connecter</a>`
+      : busy ? `<p style="margin:0">Une demande est déjà en cours de vote sur ce code.</p>`
+      : UI.codeForm ? codeReqForm(UI.codeForm, c)
+      : `<div class="btnrow"><button class="btn primary" data-act="code-form" data-v="modify">Proposer de renommer ou modifier</button><button class="btn" data-act="code-form" data-v="delete">Proposer de supprimer</button></div>
+         <p style="margin:10px 0 0;font-size:12px">Supprimer un code ne supprime aucun texte : ses lois et propositions perdent seulement leur rangement.</p>`}
+    ${me() && active ? `<a class="btn small" href="#/proposer" style="margin-top:12px;text-decoration:none;color:inherit">Déposer une proposition</a>` : ""}</div>` : ""}</aside></div>`;
 }
 
 /* ---------- Constitution ---------- */
@@ -561,12 +639,14 @@ function newHtml() {
   }
   const dflTitle = pf.title || (k === "modif" && law ? `Modifier : ${law.title}` : k === "abrog" && law ? `Abroger : ${law.title}` : "");
   const themesSel = pf.themes || (law ? law.themes : []);
+  const codeSel = pf.codeId !== undefined ? pf.codeId : law ? law.codeId : null;
   return head + `
   <form class="stack" data-form="new" style="max-width:800px">
     ${pf.forkOf ? `<div class="notice">Variante de « ${esc(pf.forkTitle || "")} ». Un lien vers l'original sera affiché des deux côtés.</div>` : ""}
     <label class="f">Titre <small>Une phrase claire qui dit ce qui change.</small><input type="text" id="p-title" required minlength="5" maxlength="120" value="${esc(dflTitle)}" placeholder="Ex. : Rendre le permis de conduire gratuit pour les 17-25 ans"></label>
     <label class="f">Résumé <small>280 caractères max. C'est ce qu'on lit en premier.</small><textarea id="p-summary" required minlength="10" maxlength="280" rows="2">${esc(pf.summary || "")}</textarea></label>
     ${specific}
+    ${k === "const" ? "" : codeSelect("p-code", codeSel)}
     ${k === "const" ? "" : `<div class="f">Thèmes<div class="checks">${THEMES.filter(t => t !== "Constitution").map(t => `<label><input type="checkbox" name="theme" value="${t}" ${themesSel.includes(t) ? "checked" : ""}> ${t}</label>`).join("")}</div></div>`}
     <label class="f">Tags <small>6 maximum, séparés par des virgules ou des espaces. Réutilise les tags existants pour qu'on retrouve ta proposition.</small><input type="text" id="p-tags" list="taglist" value="${esc((pf.tags || (law ? law.tags : [])).join(", "))}" placeholder="transparence, élus"></label>
     <datalist id="taglist">${VIEW.data.tags.map(([t]) => `<option value="${esc(t)}">`).join("")}</datalist>
@@ -586,7 +666,7 @@ function captureNew() {
   UI.prefill = Object.assign({}, pf, {
     title: g("#p-title") ?? pf.title, summary: g("#p-summary") ?? pf.summary,
     tags: $("#p-tags") ? parseTags($("#p-tags").value) : pf.tags, links: g("#p-links") ?? pf.links,
-    is2027: $("#p-2027") ? $("#p-2027").checked : pf.is2027,
+    is2027: $("#p-2027") ? $("#p-2027").checked : pf.is2027, codeId: $("#p-code") ? $("#p-code").value || null : pf.codeId,
     themes: document.querySelector("input[name=theme]") ? [...document.querySelectorAll("input[name=theme]:checked")].map(x => x.value) : pf.themes
   });
 }
@@ -594,7 +674,7 @@ async function viewFork(id) {
   const d = await api("GET", "/api/proposals/" + encodeURIComponent(id));
   UI.newKind = d.kind;
   UI.prefill = { fromRoute: true, forkOf: d.id, forkTitle: d.title, title: "Variante : " + d.title.slice(0, 100), summary: d.summary, text: curV(d).text,
-    themes: d.themes.filter(t => t !== "Constitution"), tags: d.tags, is2027: d.is2027, lawId: d.target ? d.target.lawId : null,
+    themes: d.themes.filter(t => t !== "Constitution"), tags: d.tags, is2027: d.is2027, lawId: d.target ? d.target.lawId : null, codeId: d.codeId,
     cst: d.kind === "const" ? (d.merged || curV(d).cst) : null, links: d.links.map(l => l.url).join("\n") };
   return viewNew();
 }
@@ -884,6 +964,8 @@ async function render(scrollTop = true) {
       case "p": html = await viewDetail(parts[1]); break;
       case "lois": html = await viewLaws(); break;
       case "loi": html = await viewLaw(parts[1]); break;
+      case "codes": html = await viewCodes(); break;
+      case "code": html = await viewCode(parts[1]); break;
       case "constitution": html = await viewConst(); break;
       case "2027": html = await view2027(); break;
       case "comment": html = await viewHow(); break;
@@ -989,6 +1071,16 @@ document.addEventListener("click", async e => {
     case "ban":
       if (await act(() => api("POST", `/api/admin/users/${el.dataset.u}`, { banned: el.dataset.v === "1" }), el.dataset.v === "1" ? "Compte suspendu." : "Compte rétabli.")) rerender();
       return;
+    case "code-vote": {
+      if (!me()) { UI.after = location.hash; return go("#/connexion"); }
+      const choice = el.getAttribute("aria-pressed") === "true" ? null : el.dataset.v;
+      if (await act(() => api("POST", `/api/codes/requests/${el.dataset.r}/vote`, { choice }), choice ? "Vote enregistré. Tu peux le changer jusqu'à la clôture." : "Vote retiré.")) rerender();
+      return;
+    }
+    case "code-advance":
+      if (await act(() => api("POST", `/api/codes/requests/${el.dataset.r}/advance`), "Vote clos.")) { await loadBoot(); rerender(); }
+      return;
+    case "code-form": UI.codeForm = UI.codeForm === el.dataset.v ? null : el.dataset.v; return rerender();
     case "resend": await act(() => api("POST", "/api/auth/resend"), "Lien de confirmation renvoyé."); return;
     case "share": {
       const url = BOOT.baseUrl || location.origin;
@@ -1005,8 +1097,9 @@ document.addEventListener("change", async e => {
   if (el.dataset.act === "ntype") { const keep = $("#n-text")?.value || ""; UI.noteType = el.value; await rerender(); const t = $("#n-text"); if (t) t.value = keep; return; }
   if (el.dataset.f && el.closest("#filters")) { UI.f[el.dataset.f] = el.value; await rerender(); document.getElementById(el.id)?.focus(); return; }
   if (el.id === "n-para") { const ps = paras(curV(VIEW.data).text); $("#n-proposed").value = ps[+el.value - 1] || ""; return; }
-  if (el.id === "p-law") { captureNew(); UI.prefill.lawId = el.value; delete UI.prefill.text; UI.prefill.title = ""; UI.prefill.themes = null; UI.prefill.tags = null; $("#app").innerHTML = newHtml(); $("#p-law")?.focus(); return; }
+  if (el.id === "p-law") { captureNew(); UI.prefill.lawId = el.value; delete UI.prefill.text; delete UI.prefill.codeId; UI.prefill.title = ""; UI.prefill.themes = null; UI.prefill.tags = null; $("#app").innerHTML = newHtml(); $("#p-law")?.focus(); return; }
   if (el.id === "lstatus") { UI.lawStatus = el.value; $("#lawlist").innerHTML = lawCards(); return; }
+  if (el.id === "lcode") { UI.lawCode = el.value; $("#lawlist").innerHTML = lawCards(); return; }
   if (el.dataset.act === "role") { if (await act(() => api("POST", `/api/admin/users/${el.dataset.u}`, { role: el.value }), "Rôle mis à jour.")) rerender(); }
 });
 
@@ -1084,10 +1177,17 @@ document.addEventListener("submit", async e => {
       toast(UI.noteType === "amend" ? (d.isAuthor ? "Amendement publié. Tu peux l'intégrer." : "Amendement publié. Le porteur va le lire.") : "Contribution publiée.");
       await rerender();
     }
+    else if (kind === "code-req") {
+      const body = { action: f.dataset.action, codeId: f.dataset.code || null, reason: $("#cr-reason").value };
+      if ($("#cr-name")) { body.name = $("#cr-name").value; body.description = $("#cr-desc").value; }
+      if (!local([body.reason, body.name || "", body.description || ""].join("\n"))) return;
+      await api("POST", "/api/codes/requests", body);
+      UI.codeForm = null; toast("Demande déposée. Les inscrits ont " + cstNow().params.codeDays + " jours pour voter."); await rerender();
+    }
     else if (kind === "tags") {
       const themes = [...f.querySelectorAll("input[name=theme]:checked")].map(x => x.value);
-      await api("PATCH", `/api/proposals/${d.id}/meta`, { themes, tags: $("#t-tags").value });
-      UI.editingTags = false; toast("Thèmes et tags mis à jour."); await rerender();
+      await api("PATCH", `/api/proposals/${d.id}/meta`, { themes, tags: $("#t-tags").value, codeId: $("#t-code") ? $("#t-code").value || null : undefined });
+      UI.editingTags = false; toast("Code, thèmes et tags mis à jour."); await rerender();
     }
     else if (kind === "edit") {
       const body = { text: $("#edit-text").value, note: $("#edit-note").value };
@@ -1102,7 +1202,7 @@ document.addEventListener("submit", async e => {
         kind: k, title: $("#p-title").value, summary: $("#p-summary").value, text: $("#p-text").value, tags: $("#p-tags").value,
         themes: [...f.querySelectorAll("input[name=theme]:checked")].map(x => x.value), is2027: $("#p-2027").checked,
         projetDays: +$("#p-pdays").value, delibDays: +$("#p-ddays").value, links: $("#p-links").value, forkOf: UI.prefill?.forkOf || null,
-        lawId: $("#p-law") ? $("#p-law").value : null
+        lawId: $("#p-law") ? $("#p-law").value : null, codeId: $("#p-code") ? $("#p-code").value || null : null
       };
       if (k === "const") { body.cst = readCst("c"); const err = validateCst(body.cst); if (err) { box.innerHTML = errBox("Règle invalide", err); return; } }
       if (!local([body.title, body.summary, body.text, body.tags].join("\n"))) return;
@@ -1115,7 +1215,7 @@ document.addEventListener("submit", async e => {
 });
 
 document.addEventListener("keydown", e => { if (e.key === "Escape" && $("#modal-root").innerHTML) closeModal(); });
-window.addEventListener("hashchange", () => { closeModal(); UI.editing = false; UI.editingTags = false; UI.openVer = null; if (!location.hash.startsWith("#/proposer") && !location.hash.startsWith("#/variante")) UI.prefill = null;
+window.addEventListener("hashchange", () => { closeModal(); UI.editing = false; UI.editingTags = false; UI.openVer = null; UI.codeForm = null; if (!location.hash.startsWith("#/proposer") && !location.hash.startsWith("#/variante")) UI.prefill = null;
   // Rafraîchit le compte (notifications, jury, suspension) à chaque changement de page.
   loadBoot().catch(() => {}).finally(() => render()); });
 

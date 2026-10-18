@@ -131,6 +131,8 @@ main{padding-block:28px 64px}
 button.tag{cursor:pointer}
 button.tag:hover{color:var(--ink)}
 .tag.theme{background:transparent;border:1px solid var(--line);color:var(--ink)}
+.tag.code{background:transparent;border:1px solid var(--blue);color:var(--blue);text-decoration:none;font-weight:600}
+a.tag.code:hover{background:color-mix(in srgb,var(--blue) 10%,transparent)}
 .tag.y27{background:var(--ink);color:var(--paper);font-weight:600}
 .minor{font-family:var(--f-mono);font-size:10px;font-weight:500;background:var(--warn-bg);color:var(--warn-ink);padding:1px 5px;border-radius:3px}
 .card-foot{margin-top:auto;padding-top:10px;border-top:1px dashed var(--line);display:flex;justify-content:space-between;gap:10px;align-items:center;font-size:13px}
@@ -239,6 +241,7 @@ aside.side{position:sticky;top:calc(env(safe-area-inset-top,0px) + 76px);display
 .action p{margin:0 0 12px;font-size:14px;color:var(--muted)}
 .big-n{font-family:var(--f-display);font-weight:800;font-stretch:80%;font-size:34px;line-height:1;font-variant-numeric:tabular-nums}
 .votebtns{display:grid;gap:8px}
+.votebtns.row{grid-template-columns:1fr 1fr;margin-top:10px;max-width:360px}
 .vbtn{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border:2px solid var(--line);border-radius:var(--r);background:var(--surface);cursor:pointer;font-weight:700;font-size:15px}
 .vbtn:hover{border-color:var(--c)}
 .vbtn[aria-pressed="true"]{border-color:var(--c);background:color-mix(in srgb,var(--c) 12%,var(--surface))}

@@ -43,6 +43,8 @@ Les phases avancent toutes seules : une horloge interne vérifie les échéances
 - **Abrogation** d'une loi adoptée : adoptée, la loi reste consultable mais n'est plus en vigueur.
 - **Révision de la Constitution** : changer une règle chiffrée ou un texte de principe. Majorité renforcée (plus de 60 %, 10 % de participation). Si deux révisions se chevauchent, seules les règles touchées par chacune s'appliquent, comme une fusion de branches git.
 
+**Codes :** les lois et propositions peuvent être réunies sous une appellation commune, comme « Code du travail ». Tout inscrit peut demander de créer un code, de le renommer (ou changer sa description) ou de le supprimer. La demande est votée pendant 7 jours (règle `codeDays`) et passe avec plus de 50 % de « pour » (`majorityPct`) et au moins 5 votes (`codeMinVotes`). Le porteur choisit le code de sa proposition pendant la phase Projet, et la loi adoptée le garde. Supprimer un code ne supprime aucun texte.
+
 **Et aussi :** tags et thèmes, recherche et filtres (type, phase, thème, tag, porteur, dates, tri), fichiers joints et liens, variantes (reprendre la proposition de quelqu'un d'autre), cahier « Présidentielle 2027 », votes des mineurs comptés et affichés aussi à part.
 
 **Modération citoyenne :** ce sont les inscrits qui modèrent.
@@ -215,6 +217,7 @@ mesvotes/
 │   ├── api.js              Routes de l'API JSON
 │   ├── lifecycle.js        Cycle de vie des propositions et application des résultats
 │   ├── moderation.js       Signalements, jurys tirés au sort, sanctions, appels
+│   ├── codes.js            Codes (Code du travail…) et votes sur leur création, modification, suppression
 │   ├── model.js            Accès aux données et mise en forme
 │   ├── db.js               SQLite (node:sqlite) et migrations
 │   ├── auth.js             Mots de passe (scrypt), sessions, jetons
@@ -230,7 +233,7 @@ mesvotes/
 │       ├── diff.js           différences mot à mot
 │       ├── moderation.js     filtre automatique
 │       └── util.js
-├── test/api.test.js        Tests de bout en bout (node:test)
+├── test/*.test.js          Tests de bout en bout (node:test)
 ├── scripts/                install, update, backup, restore
 ├── Dockerfile · docker-compose.yml · Caddyfile
 └── .github/workflows/ci.yml
@@ -244,11 +247,11 @@ La Constitution, le calcul des différences et le filtre de modération sont éc
 |---|---|---|
 | `GET` | `/api/bootstrap` | Compte connecté, Constitution (toutes versions), statistiques |
 | `POST` | `/api/auth/register` · `login` · `logout` · `forgot` · `reset` · `resend` | Comptes |
-| `GET` | `/api/proposals?q&kind&phase&theme&tag&author&from&to&only27&mine&sort` | Liste filtrée |
+| `GET` | `/api/proposals?q&kind&phase&theme&tag&code&author&from&to&only27&mine&sort` | Liste filtrée |
 | `POST` | `/api/proposals` | Déposer une proposition |
 | `GET` | `/api/proposals/:id` | Détail complet (versions, débat, résultats) |
 | `POST` | `/api/proposals/:id/versions` · `notes` · `parrainage` · `vote` | Participer |
-| `PATCH` | `/api/proposals/:id/meta` | Thèmes et tags (porteur, phase Projet) |
+| `PATCH` | `/api/proposals/:id/meta` | Code, thèmes et tags (porteur, phase Projet) |
 | `POST` | `/api/notes/:id/decision` | Intégrer ou refuser un amendement |
 | `POST` | `/api/reports` | Signaler (`type` : `note`, `proposal` ou `user`, `id`, `reason`, `comment`) |
 | `GET` | `/api/moderation` · `/api/cases/:id` | Décisions publiques, affaires à juger, détail d'une affaire |
@@ -256,6 +259,8 @@ La Constitution, le calcul des différences et le filtre de modération sont éc
 | `GET/POST` | `/api/notifications` · `/api/notifications/read` | Notifications |
 | `GET` | `/api/users/:pseudo` | Profil public |
 | `GET` | `/api/laws` · `/api/laws/:id` · `/api/constitution` · `/api/journal` | Données publiques |
+| `GET` | `/api/codes` · `/api/codes/:id` | Codes, leurs lois et propositions, demandes en cours et décisions |
+| `POST` | `/api/codes/requests` · `/api/codes/requests/:id/vote` | Demander de créer, modifier ou supprimer un code (`action` : `create`, `modify`, `delete`) ; voter (`choice` : `p`, `c` ou `null`) |
 | `POST` | `/api/uploads` | Fichier joint (corps brut, en-tête `x-file-name`) |
 | `GET/POST` | `/api/mod/*` · `/api/admin/*` | Modération et administration |
 
