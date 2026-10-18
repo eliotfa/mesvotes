@@ -10,6 +10,7 @@ import { handleApi, serveUpload, purgeOrphanUploads } from "./api.js";
 import { ensureConstitution } from "./model.js";
 import { tick } from "./lifecycle.js";
 import { tickModeration } from "./moderation.js";
+import { tickCodes } from "./codes.js";
 import { purgeExpired } from "./auth.js";
 import { seedIfEmpty } from "./seed.js";
 
@@ -68,6 +69,7 @@ export function boot() {
   if (config.seedDemo) seedIfEmpty();
   tick();
   tickModeration();
+  tickCodes();
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
@@ -83,6 +85,7 @@ if (isMain) {
     try {
       const n = tick(); if (n) console.log(`[horloge] ${n} proposition(s) ont changé de phase`);
       const m = tickModeration(); if (m) console.log(`[horloge] ${m} affaire(s) de modération traitée(s)`);
+      const c = tickCodes(); if (c) console.log(`[horloge] ${c} demande(s) sur les codes close(s)`);
       purgeExpired();
       if (Date.now() - lastUploadPurge > 3600e3) { lastUploadPurge = Date.now(); purgeOrphanUploads(); }
     }

@@ -57,7 +57,7 @@ export function rowToProposal(r) {
     projetDays: r.projet_days, delibDays: r.delib_days, rules: J(r.rules), constV: r.const_v,
     target: r.target_law ? { lawId: r.target_law, base: r.target_base } : null, constBase: normalizeCst(J(r.const_base)), underReview: !!r.under_review,
     forkOf: r.fork_of, lawId: r.law_id, files: J(r.files) || [], links: J(r.links) || [], result: J(r.result),
-    hidden: !!r.hidden, createdAt: r.created_at
+    hidden: !!r.hidden, createdAt: r.created_at, codeId: r.code_id || null
   };
 }
 export const getProposal = id => rowToProposal(q("SELECT * FROM proposals WHERE id=?").get(String(id)));
@@ -78,11 +78,14 @@ export function lawFull(id) {
   const l = q("SELECT * FROM laws WHERE id=?").get(String(id));
   if (!l) return null;
   return {
-    id: l.id, title: l.title, themes: J(l.themes) || [], tags: J(l.tags) || [], status: l.status, createdAt: l.created_at,
+    id: l.id, title: l.title, themes: J(l.themes) || [], tags: J(l.tags) || [], status: l.status, createdAt: l.created_at, codeId: l.code_id || null,
     versions: q("SELECT * FROM law_versions WHERE law_id=? ORDER BY n").all(l.id).map(v => ({ n: v.n, date: v.date, text: v.text, note: v.note, via: v.via, abrog: !!v.abrog }))
   };
 }
 export const lawsAll = () => q("SELECT id FROM laws").all().map(r => lawFull(r.id));
+
+/** Code en vigueur auquel un texte est rattaché (table créée par codes.js). */
+export const codeRef = id => id ? q("SELECT id, name FROM codes WHERE id=? AND status='actif'").get(id) || null : null;
 
 /* ---------- sérialisation ---------- */
 function participation(id) { return q("SELECT COUNT(*) c FROM votes WHERE proposal_id=?").get(id).c; }
@@ -114,7 +117,7 @@ export function proposalDetail(id, viewer) {
     return { ...base, masked: n.hidden === 1, text: n.text, base: n.base, proposed: n.proposed };
   });
   const out = {
-    ...p, authorId: undefined, author: author(p.authorId), isAuthor: p.authorId === vid,
+    ...p, authorId: undefined, author: author(p.authorId), isAuthor: p.authorId === vid, code: codeRef(p.codeId),
     myFlag: !!q("SELECT 1 x FROM flags WHERE target_type='proposal' AND target_id=? AND user_id=?").get(p.id, vid),
     versions, notes,
     parrains: q("SELECT COUNT(*) c FROM parrainages WHERE proposal_id=?").get(p.id).c,
@@ -141,6 +144,7 @@ export function proposalSummaries(viewer) {
   const last = Object.fromEntries(q(`SELECT pv.proposal_id id, pv.text, pv.cst FROM proposal_versions pv
      JOIN (SELECT proposal_id, MAX(n) m FROM proposal_versions GROUP BY proposal_id) x ON x.proposal_id=pv.proposal_id AND pv.n=x.m`).all().map(r => [r.id, r]));
   const laws = Object.fromEntries(q("SELECT id, title FROM laws").all().map(l => [l.id, l.title]));
+  const codes = Object.fromEntries(q("SELECT id, name FROM codes WHERE status='actif'").all().map(c => [c.id, c]));
   // Auteurs joints à la requête : on ne charge pas toute la table des comptes à chaque liste.
   const rows = q(`SELECT p.*, u.pseudo AS a_pseudo, u.minor AS a_minor FROM proposals p
      LEFT JOIN users u ON u.id=p.author_id ${isMod(viewer) ? "" : "WHERE p.hidden=0"}`).all();
@@ -152,12 +156,12 @@ export function proposalSummaries(viewer) {
       id: p.id, kind: p.kind, title: p.title, summary: p.summary, author: a, themes: p.themes, tags: p.tags, is2027: p.is2027,
       phase: p.phase, dates: p.dates, hidden: p.hidden, versionsCount: nVersions[p.id] || 0, notesCount: nNotes[p.id] || 0,
       attCount: p.files.length + p.links.length, parrains: nParr[p.id] || 0, threshold: threshold(p, el), phaseEnd: phaseEnd(p),
-      participation: nVotes[p.id] || 0, targetTitle: lawTitle, forkOf: p.forkOf,
+      participation: nVotes[p.id] || 0, targetTitle: lawTitle, forkOf: p.forkOf, code: codes[p.codeId] || null,
       result: p.result ? { outcome: p.result.outcome, pourPct: p.result.pourPct } : null
     };
     if (p.kind === "const" && p.constBase && lv.cst) s.constChanges = paramChanges(p.constBase, normalizeCst(J(lv.cst)));
     s.underReview = p.underReview;
-    s._search = normQ([p.title, p.summary, lv.text || "", a.pseudo, ...p.tags, ...p.themes, lawTitle].join(" "));
+    s._search = normQ([p.title, p.summary, lv.text || "", a.pseudo, ...p.tags, ...p.themes, lawTitle, s.code?.name || ""].join(" "));
     s._authorId = p.authorId;
     return s;
   });
