@@ -74,7 +74,7 @@ route("GET", "/api/bootstrap", (req) => {
     me: meView(u), constitution: cstAll(), electorate: electorate(), demoMode: config.demoMode, mailEnabled: config.mailEnabled,
     stats: { proposals: counts.total || 0, votesOpen: counts.votes || 0, lawsInForce: q("SELECT COUNT(*) c FROM laws WHERE status='vigueur'").get().c,
       members: q("SELECT COUNT(*) c FROM users WHERE pass_hash IS NOT NULL AND banned=0").get().c },
-    goalMembers: config.goalMembers, legal: config.legal, baseUrl: config.baseUrl
+    goalMembers: config.goalMembers, legal: config.legal, baseUrl: config.baseUrl, codes: codesList()
   };
 });
 
@@ -194,7 +194,7 @@ route("GET", "/api/proposals", (req, res, { url }) => {
   const words = normQ(f("q")).split(/\s+/).filter(Boolean);
   const from = f("from") ? Date.parse(f("from") + "T00:00:00") : null, to = f("to") ? Date.parse(f("to") + "T23:59:59") : null;
   let L = all.filter(s => (!f("kind") || s.kind === f("kind")) && (!f("phase") || s.phase === f("phase")) && (!f("theme") || s.themes.includes(f("theme"))) &&
-    (!f("tag") || s.tags.includes(f("tag"))) && (!f("author") || s.author.pseudo === f("author")) && (f("only27") !== "1" || s.is2027) &&
+    (!f("tag") || s.tags.includes(f("tag"))) && (!f("author") || s.author.pseudo === f("author")) && (f("only27") !== "1" || s.is2027) && (!f("code") || s.code?.id === f("code")) &&
     (from === null || s.dates.projet >= from) && (to === null || s.dates.projet <= to) && (f("mine") !== "1" || (u && s._authorId === u.id)) &&
     words.every(w => s._search.includes(w)));
   const ORDER = ["vote", "deliberation", "parrainage", "projet", "fin"];
@@ -232,6 +232,12 @@ function cleanLinks(list) {
     return { label: url.hostname.replace(/^www\./, ""), url: url.href.slice(0, 500) };
   });
 }
+/** Code choisi par le porteur : un code en vigueur, jamais pour une révision de la Constitution. */
+function cleanCode(id, kind) {
+  if (kind === "const" || !id) return null;
+  const c = activeCode(id); if (!c) fail(400, "Ce code n'existe pas ou a été supprimé.");
+  return c.id;
+}
 function cleanThemes(list, kind) {
   const t = (Array.isArray(list) ? list : []).filter(x => THEMES.includes(x) && x !== "Constitution");
   return kind === "const" ? ["Constitution", ...t] : [...new Set(t)];
@@ -244,7 +250,7 @@ route("POST", "/api/proposals", async (req) => {
   const kind = String(b.kind || "loi"); if (!KINDS[kind]) fail(400, "Type de proposition inconnu.");
   const title = str(b.title, 5, 120, "Le titre"), summary = str(b.summary, 10, 280, "Le résumé");
   const text = normText(str(b.text, 10, 20000, kind === "loi" || kind === "modif" ? "Le texte" : "L'exposé des motifs"));
-  const tags = parseTags(b.tags), themes = cleanThemes(b.themes, kind), links = cleanLinks(b.links);
+  const tags = parseTags(b.tags), themes = cleanThemes(b.themes, kind), links = cleanLinks(b.links), codeId = cleanCode(b.codeId, kind);
   const cur = cstNow(), r = cur.params;
   const projetDays = Math.round(Number(b.projetDays)), delibDays = Math.round(Number(b.delibDays));
   if (!(projetDays >= r.projetMin && projetDays <= r.projetMax)) fail(400, `La phase Projet doit durer entre ${r.projetMin} et ${r.projetMax} jours.`);
@@ -258,7 +264,8 @@ route("POST", "/api/proposals", async (req) => {
     const law = lawFull(b.lawId);
     if (!law || law.status !== "vigueur") fail(400, "Choisis une loi en vigueur.");
     target = { lawId: law.id, base: law.versions.length };
-    if (kind === "modif" && text === normText(law.versions[law.versions.length - 1].text)) fail(400, "Le texte proposé est identique à la loi en vigueur. Modifie-le avant de déposer.");
+    // Un texte identique reste possible pour seulement ranger la loi dans un autre code.
+    if (kind === "modif" && text === normText(law.versions[law.versions.length - 1].text) && codeId === law.codeId) fail(400, "Le texte proposé est identique à la loi en vigueur. Modifie-le, ou change son code, avant de déposer.");
   }
   if (kind === "const") {
     cst = sanitizeCst(b.cst);
@@ -269,10 +276,10 @@ route("POST", "/api/proposals", async (req) => {
   }
   const id = uid(10), at = now();
   tx(() => {
-    q(`INSERT INTO proposals(id,kind,title,summary,author_id,themes,tags,is2027,phase,dates,projet_days,delib_days,rules,const_v,target_law,target_base,const_base,fork_of,files,links,created_at)
-       VALUES (?,?,?,?,?,?,?,?,'projet',?,?,?,?,?,?,?,?,?,?,?,?)`)
+    q(`INSERT INTO proposals(id,kind,title,summary,author_id,themes,tags,is2027,phase,dates,projet_days,delib_days,rules,const_v,target_law,target_base,const_base,fork_of,files,links,created_at,code_id)
+       VALUES (?,?,?,?,?,?,?,?,'projet',?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(id, kind, title, summary, u.id, S(themes), S(tags), b.is2027 ? 1 : 0, S({ projet: at }), projetDays, delibDays, S(r), cur.n,
-        target?.lawId ?? null, target?.base ?? null, constBase ? S(constBase) : null, forkOf, S(files), S(links), at);
+        target?.lawId ?? null, target?.base ?? null, constBase ? S(constBase) : null, forkOf, S(files), S(links), at, codeId);
     q("INSERT INTO proposal_versions(proposal_id,n,date,note,text,cst) VALUES (?,1,?,?,?,?)").run(id, at, "Version initiale", text, cst ? S(cst) : null);
   });
   return { id };
@@ -298,11 +305,12 @@ route("POST", "/api/proposals/:id/versions", async (req, res, { params }) => {
 
 route("PATCH", "/api/proposals/:id/meta", async (req, res, { params }) => {
   const u = requireActive(req), p = loadForAction(params.id), b = await readJson(req);
-  if (p.authorId !== u.id) fail(403, "Seul le porteur peut modifier les thèmes et les tags.");
-  if (p.phase !== "projet") fail(409, "Les thèmes et tags sont figés après la phase Projet.");
+  if (p.authorId !== u.id) fail(403, "Seul le porteur peut modifier les thèmes, les tags et le code.");
+  if (p.phase !== "projet") fail(409, "Les thèmes, tags et code sont figés après la phase Projet.");
   p.tags = parseTags(b.tags); p.themes = cleanThemes(b.themes, p.kind);
+  const codeId = b.codeId === undefined ? p.codeId : cleanCode(b.codeId, p.kind);
   checkContent(p.tags.join(" "));
-  q("UPDATE proposals SET themes=?, tags=? WHERE id=?").run(S(p.themes), S(p.tags), p.id);
+  q("UPDATE proposals SET themes=?, tags=?, code_id=? WHERE id=?").run(S(p.themes), S(p.tags), codeId, p.id);
   return { ok: true };
 });
 
@@ -435,6 +443,30 @@ route("GET", "/api/laws/:id", (req, res, { params }) => {
   return { ...l, related };
 });
 route("GET", "/api/constitution", () => ({ versions: cstAll() }));
+
+/* ---------- codes ---------- */
+route("GET", "/api/codes", (req) => ({ items: codesList(), requests: requestsList(currentUser(req)) }));
+route("GET", "/api/codes/:id", (req, res, { params }) => {
+  const c = getCode(params.id); if (!c) fail(404, "Code introuvable.");
+  const viewer = currentUser(req);
+  const laws = lawsAll().filter(l => l.codeId === c.id).map(({ versions, ...l }) => ({ ...l, version: versions.length, date: versions[versions.length - 1].date, excerpt: paras(versions[versions.length - 1].text)[0] || "" }));
+  const proposals = c.status === "actif" ? proposalSummaries(viewer).filter(s => s.code?.id === c.id && s.phase !== "fin").map(({ _search, _authorId, ...s }) => s) : [];
+  return { ...c, laws, proposals, requests: requestsList(viewer, c.id) };
+});
+route("POST", "/api/codes/requests", async (req) => {
+  const u = requireActive(req);
+  rateLimit("code:" + u.id, 10, 3600e3, "Tu as déposé beaucoup de demandes en peu de temps. Réessaie plus tard.");
+  return openRequest(u, await readJson(req), checkContent);
+});
+route("POST", "/api/codes/requests/:id/vote", async (req, res, { params }) => {
+  const u = requireActive(req), b = await readJson(req);
+  return voteRequest(u, params.id, b.choice ?? null);
+});
+route("POST", "/api/codes/requests/:id/advance", (req, res, { params }) => {
+  if (!config.demoMode) fail(403, "Le mode démo n'est pas activé sur ce serveur.");
+  requireAdmin(req);
+  return closeNow(params.id);
+});
 route("GET", "/api/journal", () => ({ items: q("SELECT date,text FROM journal ORDER BY id DESC LIMIT 50").all() }));
 
 /* ---------- fichiers ---------- */

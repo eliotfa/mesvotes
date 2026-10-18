@@ -21,11 +21,14 @@ function tallies(id) {
   return t;
 }
 
+// Un code supprimé entre le dépôt et l'adoption n'est pas repris.
+const activeCodeId = id => id && q("SELECT id FROM codes WHERE id=? AND status='actif'").get(id) ? id : null;
+
 function applyAdopted(p, result, at) {
   const v = lastVersion(p.id), share = `${fr(result.pourPct)} % pour`;
   if (p.kind === "loi") {
     const id = "l" + uid(8);
-    q("INSERT INTO laws(id,title,themes,tags,status,created_at) VALUES (?,?,?,?,'vigueur',?)").run(id, p.title, S(p.themes), S(p.tags), at);
+    q("INSERT INTO laws(id,title,themes,tags,status,created_at,code_id) VALUES (?,?,?,?,'vigueur',?,?)").run(id, p.title, S(p.themes), S(p.tags), at, activeCodeId(p.codeId));
     q("INSERT INTO law_versions(law_id,n,date,text,note,via,abrog) VALUES (?,1,?,?,?,?,0)").run(id, at, v.text, `Adoptée par vote · ${share}`, p.id);
     p.lawId = id;
     return "La loi entre dans le recueil.";
@@ -36,6 +39,7 @@ function applyAdopted(p, result, at) {
     const n = law.versions.length + 1;
     if (p.kind === "modif") {
       q("INSERT INTO law_versions(law_id,n,date,text,note,via,abrog) VALUES (?,?,?,?,?,?,0)").run(law.id, n, at, v.text, `Modification adoptée : « ${p.title} » · ${share}`, p.id);
+      q("UPDATE laws SET code_id=? WHERE id=?").run(activeCodeId(p.codeId), law.id);
       return `La loi passe en version ${n}.`;
     }
     q("UPDATE laws SET status='abrogée' WHERE id=?").run(law.id);
