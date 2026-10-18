@@ -88,7 +88,7 @@ export const lawsAll = () => q("SELECT id FROM laws").all().map(r => lawFull(r.i
 export const codeRef = id => id ? q("SELECT id, name FROM codes WHERE id=? AND status='actif'").get(id) || null : null;
 
 /* ---------- sérialisation ---------- */
-function participation(id) { return q("SELECT COUNT(*) c FROM votes WHERE proposal_id=?").get(id).c; }
+function participation(id) { return q("SELECT COUNT(*) c FROM vote_participations WHERE proposal_id=?").get(id).c; }
 
 /** Votes pour supprimer définitivement un contenu masqué. */
 export function deletionState(viewer, type, id) {
@@ -123,7 +123,8 @@ export function proposalDetail(id, viewer) {
     parrains: q("SELECT COUNT(*) c FROM parrainages WHERE proposal_id=?").get(p.id).c,
     myParrain: !!q("SELECT 1 x FROM parrainages WHERE proposal_id=? AND user_id=?").get(p.id, vid),
     participation: participation(p.id),
-    myVote: q("SELECT choice FROM votes WHERE proposal_id=? AND user_id=?").get(p.id, vid)?.choice || null,
+    // On sait si l'inscrit a voté, jamais ce qu'il a voté : l'urne ne connaît pas les comptes.
+    voted: !!q("SELECT 1 x FROM vote_participations WHERE proposal_id=? AND user_id=?").get(p.id, vid),
     threshold: threshold(p, el), phaseEnd: phaseEnd(p), electorate: el,
     law: p.target ? lawFull(p.target.lawId) : null,
     fork: p.forkOf ? (q("SELECT id,title FROM proposals WHERE id=?").get(p.forkOf) || null) : null,
@@ -140,7 +141,7 @@ export function proposalSummaries(viewer) {
   const nVersions = count("SELECT proposal_id id, COUNT(*) c FROM proposal_versions GROUP BY proposal_id");
   const nNotes = count("SELECT proposal_id id, COUNT(*) c FROM notes WHERE hidden<2 GROUP BY proposal_id");
   const nParr = count("SELECT proposal_id id, COUNT(*) c FROM parrainages GROUP BY proposal_id");
-  const nVotes = count("SELECT proposal_id id, COUNT(*) c FROM votes GROUP BY proposal_id");
+  const nVotes = count("SELECT proposal_id id, COUNT(*) c FROM vote_participations GROUP BY proposal_id");
   const last = Object.fromEntries(q(`SELECT pv.proposal_id id, pv.text, pv.cst FROM proposal_versions pv
      JOIN (SELECT proposal_id, MAX(n) m FROM proposal_versions GROUP BY proposal_id) x ON x.proposal_id=pv.proposal_id AND pv.n=x.m`).all().map(r => [r.id, r]));
   const laws = Object.fromEntries(q("SELECT id, title FROM laws").all().map(l => [l.id, l.title]));

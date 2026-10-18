@@ -6,7 +6,7 @@ Document de décision. Il ne change pas le code : il propose un chemin et liste 
 
 **Un compte n'est pas une personne.** Aujourd'hui, un inscrit peut créer plusieurs comptes avec plusieurs adresses e-mail. Dans une démocratie directe, cela fausse directement le résultat : le quorum (5 %) et la majorité se calculent sur des comptes, pas sur des personnes. Le même problème touche les jurys de modération, tirés au sort parmi les comptes.
 
-**Le vote n'est pas secret.** La table `votes` relie chaque choix à un `user_id`. Les résultats publics sont agrégés, mais un administrateur qui accède au serveur peut lire qui a voté quoi. C'est une limite assumée pour l'instant (README, « Sécurité et limites connues ») : elle doit être traitée avant d'ouvrir largement la plateforme.
+**Le vote n'était pas secret.** La table `votes` reliait chaque choix à un `user_id` (corrigé par l'étape 1 ci-dessous). Les résultats publics sont agrégés, mais un administrateur qui accède au serveur peut lire qui a voté quoi. C'est une limite assumée pour l'instant (README, « Sécurité et limites connues ») : elle doit être traitée avant d'ouvrir largement la plateforme.
 
 ## Identité : les options
 
@@ -28,7 +28,7 @@ Ce choix transforme une décision binaire (« on exige l'identité ou pas ») en
 
 ## Secret du vote : les étapes
 
-**Étape 1 — séparer qui a voté de ce qui a été voté (faible coût).**
+**Étape 1 — séparer qui a voté de ce qui a été voté (faible coût).** *Faite (migration v5) : tables `vote_participations` / `ballots` et `case_ballots` pour les jurys. Le `ballot_id` est l'empreinte d'un code de vote généré par le serveur et remis une seule fois, plutôt qu'un secret gardé dans le navigateur, pour que le vote fonctionne sur une tablette partagée. La date de participation est arrondie au jour et l'urne n'en porte aucune.*
 - Une table `participations(proposal_id, user_id)` sert à empêcher de voter deux fois et à compter la participation.
 - Une table `bulletins(proposal_id, ballot_id, choice)` ne contient ni `user_id` ni date précise (arrondie à l'heure).
 - Le `ballot_id` est dérivé côté navigateur d'un secret propre à l'inscrit (`HMAC(secret_inscrit, proposition)`). Il permet de changer d'avis sans que le serveur sache qui est derrière.

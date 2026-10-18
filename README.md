@@ -31,7 +31,7 @@ Chaque proposition suit le même parcours, fixé par la **Constitution** de la p
 | **Projet** | 15 à 90 jours (au choix du porteur) | Tout le monde commente, apporte des sources et propose des amendements sur un paragraphe précis. Le porteur intègre ou refuse. Chaque version est gardée, avec ses différences mot à mot. |
 | **Parrainage** | 60 jours maximum | Le texte est figé. Il faut 1 % des inscrits en parrains (minimum 50). Sinon, la proposition est archivée. |
 | **Délibération** | 90 à 180 jours (au choix du porteur) | Le vote est annoncé. Temps long pour lire, comparer, débattre. |
-| **Vote** | 7 jours | Pour, contre ou abstention, modifiable jusqu'à la clôture. Résultats cachés jusqu'à la fin. |
+| **Vote** | 7 jours | Pour, contre ou abstention, modifiable jusqu'à la clôture avec le code de vote reçu en votant. Vote secret : le site sait qui a voté, pas ce qu'il a voté. Résultats cachés jusqu'à la fin. |
 | **Résultat** | — | Adoptée si plus de 50 % de « pour » parmi les exprimés et au moins 5 % de participation. S'applique automatiquement. |
 
 Les phases avancent toutes seules : une horloge interne vérifie les échéances chaque minute.
@@ -45,7 +45,7 @@ Les phases avancent toutes seules : une horloge interne vérifie les échéances
 
 **Codes :** les lois et propositions peuvent être réunies sous une appellation commune, comme « Code du travail ». Tout inscrit peut demander de créer un code, de le renommer (ou changer sa description) ou de le supprimer. La demande est votée pendant 7 jours (règle `codeDays`) et passe avec plus de 50 % de « pour » (`majorityPct`) et au moins 5 votes (`codeMinVotes`). Le porteur choisit le code de sa proposition pendant la phase Projet, et la loi adoptée le garde. Supprimer un code ne supprime aucun texte.
 
-**Et aussi :** tags et thèmes, recherche et filtres (type, phase, thème, tag, porteur, dates, tri), fichiers joints et liens, variantes (reprendre la proposition de quelqu'un d'autre), cahier « Présidentielle 2027 », votes des mineurs comptés et affichés aussi à part.
+**Et aussi :** tags et thèmes, recherche et filtres (type, phase, thème, tag, porteur, dates, tri), fichiers joints et liens, variantes (reprendre la proposition de quelqu'un d'autre), cahier « Présidentielle 2027 », votes des mineurs comptés et affichés aussi à part (dès 5 votants mineurs, pour ne pas dévoiler leurs choix).
 
 **Modération citoyenne :** ce sont les inscrits qui modèrent.
 
@@ -220,6 +220,7 @@ mesvotes/
 │   ├── codes.js            Codes (Code du travail…) et votes sur leur création, modification, suppression
 │   ├── model.js            Accès aux données et mise en forme
 │   ├── db.js               SQLite (node:sqlite) et migrations
+│   ├── ballot.js           Secret du vote : codes de vote, urne séparée de la participation
 │   ├── auth.js             Mots de passe (scrypt), sessions, jetons
 │   ├── antibot.js          Preuve de travail, délai minimum, champ piège
 │   ├── mail.js             Client SMTP minimal
@@ -277,7 +278,9 @@ Toute requête d'écriture doit porter l'en-tête `x-mesvotes: 1` (protection CS
 **Limites assumées à ce stade :**
 
 - **Pas de vérification d'identité.** Une même personne peut créer plusieurs comptes avec plusieurs e-mails. Les options (niveaux de confiance, parrainage, prestataire de vérification) sont décrites dans [docs/identite-et-vote-secret.md](docs/identite-et-vote-secret.md).
-- **Le secret du vote n'est pas cryptographique.** La base associe chaque vote à un compte (c'est ce qui permet de changer d'avis jusqu'à la clôture). Les résultats ne sont publiés qu'agrégés, mais un administrateur ayant accès au serveur pourrait lire les votes. Une évolution prévue : des bulletins anonymes avec jetons à usage unique (voir le document ci-dessus).
+- **Secret du vote : qui a voté est séparé de ce qui a été voté.** Le registre de participation (`vote_participations`, `case_jurors`, `code_participations`) note qui a voté et quel jour. L'urne (`ballots`, `case_ballots`, `code_ballots`) garde le choix sans compte, sans date et sans ordre d'arrivée, rangé sous l'empreinte d'un code de vote remis une seule fois à l'électeur. Ce code est le seul moyen de changer son vote ; rien n'est gardé sur l'appareil, ce qui permet de voter sur une tablette partagée. Les votes des mineurs ne sont publiés à part qu'à partir de 5 votants. La base est écrite avec `secure_delete` : un vote changé ne laisse pas de trace dans le fichier.
+- **Ce que cette séparation ne couvre pas.** Elle protège contre la lecture de la base après coup (fuite, sauvegarde, curiosité). Un serveur modifié pourrait encore noter le lien au moment du vote, puisque la même requête porte la session et le choix. Seuls des jetons signés à l'aveugle protégeraient contre cela (étape 2 du document ci-dessus).
+- **Mise à jour vers cette version : purger les anciennes sauvegardes.** La migration efface les liens compte → choix de la base, mais les sauvegardes faites avant (`backups/`) les contiennent encore. Supprime-les après la mise à jour.
 - **Mineurs :** l'âge est déclaratif.
 - **Données personnelles :** si le site s'ouvre largement, les opinions politiques sont des données sensibles au sens du RGPD. Il faudra alors une politique de confidentialité, des mentions légales et une analyse d'impact.
 

@@ -424,14 +424,19 @@ function sideHtml(d) {
   } else if (d.phase === "vote") {
     const opts = [["p", "Pour", "--pour"], ["c", "Contre", "--contre"], ["a", "Abstention", "--abst"]];
     a = `<h3 style="color:${c}">Vote ouvert</h3>
-      <p>Clôture le ${fmtD(d.phaseEnd)} (J-${daysLeft(d.phaseEnd)}). Tu peux changer d'avis jusqu'à la fin.${d.kind === "const" ? ` Une révision demande plus de ${n_(needMaj(d))} % de « pour ».` : ""}</p>
-      ${u ? `<div class="votebtns" role="group" aria-label="Ton vote">${opts.map(([k, l, cv]) => `<button class="vbtn" style="--c:var(${cv})" data-act="vote" data-v="${k}" aria-pressed="${d.myVote === k}" ${needsVerify() ? "disabled" : ""}><span>${l}</span><span class="box">${d.myVote === k ? "✓" : ""}</span></button>`).join("")}</div>` : loginBtn("Se connecter pour voter")}
+      <p>Clôture le ${fmtD(d.phaseEnd)} (J-${daysLeft(d.phaseEnd)}). Tu peux changer d'avis jusqu'à la fin avec ton code de vote.${d.kind === "const" ? ` Une révision demande plus de ${n_(needMaj(d))} % de « pour ».` : ""}</p>
+      ${!u ? loginBtn("Se connecter pour voter")
+        : UI.receipt?.id === d.id ? receiptBox(UI.receipt)
+        : d.voted ? `<p style="margin:0 0 10px"><strong>✓ Tu as voté.</strong> Ton choix n'est pas enregistré avec ton nom : pour le changer ou le retirer, saisis ton code de vote.</p>
+          <form class="stack" data-form="revote">${codeField()}<div class="votebtns">${[...opts, ["x", "Retirer mon vote"]].map(([k, l]) => `<label class="optrow"><input type="radio" name="choice" value="${k}" required><span>${l}</span></label>`).join("")}</div>
+          <div class="form-msg"></div><button class="btn primary" type="submit">Changer mon vote</button></form>`
+        : `<div class="votebtns" role="group" aria-label="Ton vote">${opts.map(([k, l, cv]) => `<button class="vbtn" style="--c:var(${cv})" data-act="vote" data-v="${k}" ${needsVerify() ? "disabled" : ""}><span>${l}</span><span class="box"></span></button>`).join("")}</div>`}
       <p style="margin:12px 0 0;font-size:13px"><strong class="mono" style="color:var(--ink)">${fmtN(d.participation)}</strong> votants (${n_(pct(d.participation, d.electorate))} % des inscrits). Les résultats restent cachés jusqu'à la clôture pour ne pas influencer le vote.</p>`;
   } else {
     const r = d.result || {};
     if (r.outcome === "expired") a = `<div class="result-banner" style="--c:var(--abst)">Archivée</div><p>Le parrainage n'a pas atteint le seuil à temps (${fmtN(r.parrains)} sur ${fmtN(r.threshold)}). Chacun peut la reprendre sous forme de variante.</p>`;
     else {
-      const v = r.votes, t = { p: v.maj.p + v.min.p, c: v.maj.c + v.min.c, a: v.maj.a + v.min.a }; t.all = t.p + t.c + t.a;
+      const v = r.votes, m = v.min || { p: 0, c: 0, a: 0 }, t = { p: v.maj.p + m.p, c: v.maj.c + m.c, a: v.maj.a + m.a }; t.all = t.p + t.c + t.a;
       const ok = r.outcome === "adopted";
       const row = (l, x, cv) => `<div class="res-row"><span>${l}</span><div class="bar" style="--c:var(${cv})"><span style="width:${pct(x, t.all)}%"></span></div><span class="pct">${n_(pct(x, t.all))} %</span></div>`;
       const grp = (g, label) => { const x = v[g], tt = x.p + x.c + x.a; return `<div><h4>${label} · ${fmtN(tt)}</h4><div class="stacked" role="img" aria-label="${label} : ${pct(x.p, tt)} % pour, ${pct(x.c, tt)} % contre, ${pct(x.a, tt)} % abstention"><span style="width:${pct(x.p, tt)}%;background:var(--pour)"></span><span style="width:${pct(x.c, tt)}%;background:var(--contre)"></span><span style="width:${pct(x.a, tt)}%;background:var(--abst)"></span></div><div class="mono" style="font-size:12px;margin-top:4px;color:var(--muted)">${n_(pct(x.p, tt))} / ${n_(pct(x.c, tt))} / ${n_(pct(x.a, tt))}</div></div>`; };
@@ -440,7 +445,7 @@ function sideHtml(d) {
       a = `<div class="result-banner" style="--c:${ok ? "var(--pour)" : "var(--contre)"}">${ok ? "Adoptée" : "Rejetée"}</div>
         ${row("Pour", t.p, "--pour")}${row("Contre", t.c, "--contre")}${row("Abstention", t.a, "--abst")}
         <p style="margin:10px 0 0;font-size:13px">${n_(r.pourPct)} % des voix exprimées pour (seuil : plus de ${n_(r.needMaj)} %). ${fmtN(t.all)} votants, soit ${n_(r.participationPct)} % des ${fmtN(r.electorate)} inscrits (minimum ${n_(r.needQuo)} %).</p>
-        <div class="split">${grp("maj", "Majeurs")}${grp("min", "Mineurs")}</div>
+        ${v.min ? `<div class="split">${grp("maj", "Majeurs")}${grp("min", "Mineurs")}</div>` : v.minorsMerged ? `<p class="muted" style="margin:10px 0 0;font-size:12px">Trop peu de votants mineurs pour publier leur décompte à part sans dévoiler leurs choix : ils sont comptés dans le total.</p>` : ""}
         <p style="margin:10px 0 0;font-size:12px">Pour / contre / abstention, en %.${r.applied ? " " + esc(r.applied) : ""}</p>${link}`;
     }
   }
@@ -505,7 +510,11 @@ function codeRequestHtml(r) {
     : r.action === "modify" ? `<p style="margin:6px 0 0">Nouveau nom : <b>${esc(r.name)}</b>${r.description ? ` · description : ${esc(r.description)}` : ""}</p>` : "";
   const open = r.status === "open", res = r.result;
   const vote = !open ? "" : !me() ? `<a class="btn small" href="#/connexion" data-act="login-then" style="text-decoration:none">Se connecter pour voter</a>`
-    : `<div class="votebtns row" role="group" aria-label="Ton vote">${[["p", "Pour", "--pour"], ["c", "Contre", "--contre"]].map(([k, l, cv]) => `<button class="vbtn" style="--c:var(${cv})" data-act="code-vote" data-r="${r.id}" data-v="${k}" aria-pressed="${r.myVote === k}" ${needsVerify() ? "disabled" : ""}><span>${l}</span><span class="box">${r.myVote === k ? "✓" : ""}</span></button>`).join("")}</div>`;
+    : UI.receipt?.id === r.id ? receiptBox(UI.receipt)
+    : r.voted ? `<p style="margin:8px 0">✓ Tu as voté. Pour changer ou retirer ton vote, saisis ton code de vote.</p>
+      <form class="stack" data-form="code-revote" data-r="${r.id}">${codeField()}<div class="votebtns row">${[["p", "Pour"], ["c", "Contre"], ["x", "Retirer mon vote"]].map(([k, l]) => `<label class="optrow"><input type="radio" name="choice" value="${k}" required><span>${l}</span></label>`).join("")}</div>
+      <div class="form-msg"></div><button class="btn primary small" type="submit">Changer mon vote</button></form>`
+    : `<div class="votebtns row" role="group" aria-label="Ton vote">${[["p", "Pour", "--pour"], ["c", "Contre", "--contre"]].map(([k, l, cv]) => `<button class="vbtn" style="--c:var(${cv})" data-act="code-vote" data-r="${r.id}" data-v="${k}" ${needsVerify() ? "disabled" : ""}><span>${l}</span><span class="box"></span></button>`).join("")}</div>`;
   return `<div class="queue-item">
     <div class="meta"><span class="pill${r.action === "delete" ? " warn" : ""}">${REQ_LABEL[r.action]}</span><strong style="color:var(--ink)">${target}</strong><span>· demandé par ${userLink(r.author)}</span>
       <span>· ${open ? `clôture le ${fmtD(r.endsAt)} (J-${daysLeft(r.endsAt)}), ${plural(r.participation, "votant")}` : `${r.status === "adopted" ? "adoptée" : "rejetée"} le ${fmtD(res.closedAt)} · ${res.pour} pour, ${res.contre} contre`}</span></div>
@@ -750,12 +759,21 @@ async function viewAccount(params) {
   </div>`;
 }
 
+/* ---------- code de vote ---------- */
+// Le code n'est gardé qu'en mémoire, le temps de l'afficher : rien ne reste sur l'appareil,
+// ce qui compte sur une tablette partagée (en mairie, par exemple).
+const receiptBox = rc => `<div class="notice ok" role="status"><strong>A voté.</strong> Ton code de vote :
+  <div class="mono" style="font-size:18px;letter-spacing:.04em;margin:8px 0;color:var(--ink);user-select:all">${esc(rc.code)}</div>
+  <p style="margin:0 0 10px;font-size:13px">Note-le ou prends-le en photo : c'est le seul moyen de changer ton vote jusqu'à la clôture. Il ne sera plus jamais affiché. Le site sait que tu as voté, pas ce que tu as voté.</p>
+  <button class="btn small" data-act="receipt-done">C'est noté</button></div>`;
+const codeField = () => `<label class="f">Code de vote<input name="code" required autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABCDE-FGHJK-MNPQR-STUVW"></label>`;
+
 /* ---------- modération et administration ---------- */
 async function viewMod() {
   const data = await api("GET", "/api/moderation"); VIEW = { name: "mod", data };
   const r = data.rules;
   const caseRow = c => `<a class="minilink" href="#/affaire/${c.id}"><span class="t">${TYPE_LABEL[c.targetType]} · affaire ${esc(c.short)}${c.round === 2 ? " (appel)" : ""}</span>
-    <span class="meta">${c.status === "open" ? `<span class="pill">à juger avant le ${fmtD(c.deadline)}</span>` : `<span class="pill">${esc(actionLabel(c.targetType, c.decision))}</span>`}${c.reasons[0] ? `<span>${esc(REASON_LABEL[c.reasons[0][0]])}</span>` : ""}${c.myVote !== undefined ? `<span>${c.myVote ? "✓ tu as voté" : "<strong>ton vote est attendu</strong>"}</span>` : ""}</span></a>`;
+    <span class="meta">${c.status === "open" ? `<span class="pill">à juger avant le ${fmtD(c.deadline)}</span>` : `<span class="pill">${esc(actionLabel(c.targetType, c.decision))}</span>`}${c.reasons[0] ? `<span>${esc(REASON_LABEL[c.reasons[0][0]])}</span>` : ""}${c.voted !== undefined ? `<span>${c.voted ? "✓ tu as voté" : "<strong>ton vote est attendu</strong>"}</span>` : ""}</span></a>`;
   return `<div class="page-head"><h1>Modération citoyenne</h1><p>Ici, ce sont les inscrits qui modèrent. Dès ${r.modReports} signalement${r.modReports > 1 ? "s" : ""}, un jury de ${r.modJury} inscrits est tiré au sort. Il a ${r.modHours} heures pour choisir une mesure ; la mesure retenue est la médiane des votes. L'auteur peut faire appel une fois devant un jury de ${r.modJury * 2 + 1} inscrits.</p></div>
   ${me() ? `<div class="grid2">
     <div class="section"><h2>À juger · ${data.duties.length}</h2>${data.duties.length ? `<ul class="mini">${data.duties.map(c => `<li>${caseRow(c)}</li>`).join("")}</ul>` : `<p class="muted" style="margin:0;font-size:14px">Aucune affaire pour toi en ce moment. Quand tu es tiré(e) au sort, tu es prévenu(e) ici et dans tes notifications.</p>`}</div>
@@ -797,10 +815,10 @@ async function viewCase(id) {
     ${c.juryComments?.length ? `<section class="section"><h2>Remarques des jurés (anonymes)</h2><ul class="journal">${c.juryComments.map(x => `<li><span class="dt">${esc(actionLabel(c.targetType, x.vote))}</span><span>${esc(x.comment)}</span></li>`).join("")}</ul></section>` : ""}
   </div>
   <aside class="side">
-    ${c.isJuror && open ? `<div class="section action"><h3>Ton vote</h3><p>Choisis la mesure qui te semble juste. Tu peux changer d'avis jusqu'à la clôture. Ton vote reste anonyme.</p>
-      <form class="stack" data-form="jury"><div class="votebtns">${c.actions.map(a => `<label class="optrow"><input type="radio" name="action" value="${a.id}" ${c.myVote === a.id ? "checked" : ""} required><span><strong>${esc(a.label)}</strong><small>${esc(a.desc)}</small></span></label>`).join("")}</div>
-      <label class="f">Remarque pour les autres jurés <small>Facultatif, anonyme.</small><textarea id="j-comment" rows="2" maxlength="500">${esc(c.myComment || "")}</textarea></label>
-      <div class="form-msg"></div><button class="btn primary" type="submit">${c.myVote ? "Modifier mon vote" : "Voter"}</button></form></div>` : ""}
+    ${c.isJuror && open ? `<div class="section action"><h3>Ton vote</h3>${UI.receipt?.id === c.id ? receiptBox(UI.receipt) : `<p>${c.voted ? "<strong>✓ Tu as voté.</strong> Ta mesure n'est pas enregistrée avec ton nom : pour la changer, saisis ton code de vote." : "Choisis la mesure qui te semble juste. Ton vote reste anonyme : tu recevras un code pour le changer jusqu'à la clôture."}</p>
+      <form class="stack" data-form="jury">${c.voted ? codeField() : ""}<div class="votebtns">${c.actions.map(a => `<label class="optrow"><input type="radio" name="action" value="${a.id}" required><span><strong>${esc(a.label)}</strong><small>${esc(a.desc)}</small></span></label>`).join("")}</div>
+      <label class="f">Remarque pour les autres jurés <small>Facultatif, anonyme, visible après la clôture.</small><textarea id="j-comment" rows="2" maxlength="500"></textarea></label>
+      <div class="form-msg"></div><button class="btn primary" type="submit">${c.voted ? "Changer mon vote" : "Voter"}</button></form>`}</div>` : ""}
     ${c.isJuror && !open ? `<div class="section"><p style="margin:0">Merci d'avoir participé à ce jury.</p></div>` : ""}
     ${c.isTarget ? `<div class="section action"><h3>Te concernant</h3><p>${open ? "Un jury citoyen tiré au sort examine ce signalement. Tu seras prévenu(e) de la décision." : c.decision === "keep" ? "Aucune mesure n'a été prise." : c.round === 2 ? "Cette décision d'appel est définitive." : "Tu peux contester cette décision une fois, dans les 7 jours, devant un jury élargi qui n'a jamais vu l'affaire."}</p>
       ${c.canAppeal ? `<button class="btn primary" data-act="appeal" data-id="${c.id}">Faire appel</button>` : ""}${c.appealCase ? `<a class="btn" href="#/affaire/${c.appealCase}" style="text-decoration:none;color:inherit">Voir l'appel</a>` : ""}</div>` : ""}
@@ -1031,8 +1049,13 @@ document.addEventListener("click", async e => {
       return;
     }
     case "vote": {
-      const v = el.dataset.v, choice = d.myVote === v ? null : v;
-      if (await act(() => api("POST", `/api/proposals/${d.id}/vote`, { choice }), choice ? "Vote enregistré. Tu peux le changer jusqu'à la clôture." : "Vote retiré.")) rerender();
+      const r = await act(() => api("POST", `/api/proposals/${d.id}/vote`, { choice: el.dataset.v }));
+      if (r) { UI.receipt = { id: d.id, code: r.receipt }; rerender(); }
+      return;
+    }
+    case "receipt-done": {
+      if (!confirm("As-tu bien noté ton code ? Il ne sera plus affiché.")) return;
+      UI.receipt = null; rerender();
       return;
     }
     case "decide":
@@ -1075,8 +1098,8 @@ document.addEventListener("click", async e => {
       return;
     case "code-vote": {
       if (!me()) { UI.after = location.hash; return go("#/connexion"); }
-      const choice = el.getAttribute("aria-pressed") === "true" ? null : el.dataset.v;
-      if (await act(() => api("POST", `/api/codes/requests/${el.dataset.r}/vote`, { choice }), choice ? "Vote enregistré. Tu peux le changer jusqu'à la clôture." : "Vote retiré.")) rerender();
+      const r = await act(() => api("POST", `/api/codes/requests/${el.dataset.r}/vote`, { choice: el.dataset.v }));
+      if (r) { UI.receipt = { id: el.dataset.r, code: r.receipt }; rerender(); }
       return;
     }
     case "code-advance":
@@ -1090,7 +1113,7 @@ document.addEventListener("click", async e => {
       catch { toast("Copie ce lien : " + url); }
       return;
     }
-    case "logout": await act(() => api("POST", "/api/auth/logout")); await loadBoot(); toast("Déconnecté."); return go("#/");
+    case "logout": UI.receipt = null; await act(() => api("POST", "/api/auth/logout")); await loadBoot(); toast("Déconnecté."); return go("#/");
   }
 });
 
@@ -1168,9 +1191,24 @@ document.addEventListener("submit", async e => {
     else if (kind === "jury") {
       const action = f.querySelector("input[name=action]:checked")?.value;
       if (!action) { box.innerHTML = errBox("", "Choisis une mesure."); return; }
-      const r = await api("POST", `/api/cases/${d.id}/vote`, { action, comment: $("#j-comment").value });
-      toast(r.closed ? "Vote enregistré. Tous les jurés ont voté : l'affaire est close." : "Vote enregistré. Tu peux le modifier jusqu'à la clôture.");
+      const r = await api("POST", `/api/cases/${d.id}/vote`, { action, comment: $("#j-comment").value, receipt: f.querySelector("[name=code]")?.value });
+      if (r.receipt) UI.receipt = { id: d.id, code: r.receipt };
+      toast(r.closed ? "Vote enregistré. Tous les jurés ont voté : l'affaire est close." : r.receipt ? "Vote enregistré." : "Vote changé.");
       await loadBoot(); await rerender();
+    }
+    else if (kind === "code-revote") {
+      const choice = f.querySelector("input[name=choice]:checked")?.value;
+      if (!choice) { box.innerHTML = errBox("", "Choisis ton vote."); return; }
+      await api("POST", `/api/codes/requests/${f.dataset.r}/vote`, { choice: choice === "x" ? null : choice, receipt: f.querySelector("[name=code]").value });
+      toast(choice === "x" ? "Vote retiré." : "Vote changé.");
+      await rerender();
+    }
+    else if (kind === "revote") {
+      const choice = f.querySelector("input[name=choice]:checked")?.value;
+      if (!choice) { box.innerHTML = errBox("", "Choisis ton vote."); return; }
+      await api("POST", `/api/proposals/${d.id}/vote`, { choice: choice === "x" ? null : choice, receipt: f.querySelector("[name=code]").value });
+      toast(choice === "x" ? "Vote retiré." : "Vote changé.");
+      await rerender();
     }
     else if (kind === "note") {
       const text = $("#n-text").value.trim(), proposed = $("#n-proposed") ? $("#n-proposed").value.trim() : "";
@@ -1217,7 +1255,7 @@ document.addEventListener("submit", async e => {
 });
 
 document.addEventListener("keydown", e => { if (e.key === "Escape" && $("#modal-root").innerHTML) closeModal(); });
-window.addEventListener("hashchange", () => { closeModal(); UI.editing = false; UI.editingTags = false; UI.openVer = null; UI.codeForm = null; if (!location.hash.startsWith("#/proposer") && !location.hash.startsWith("#/variante")) UI.prefill = null;
+window.addEventListener("hashchange", () => { closeModal(); UI.receipt = null; UI.editing = false; UI.editingTags = false; UI.openVer = null; UI.codeForm = null; if (!location.hash.startsWith("#/proposer") && !location.hash.startsWith("#/variante")) UI.prefill = null;
   // Rafraîchit le compte (notifications, jury, suspension) à chaque changement de page.
   loadBoot().catch(() => {}).finally(() => render()); });
 

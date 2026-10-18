@@ -18,6 +18,7 @@ import { settle, forceAdvance } from "./lifecycle.js";
 import { flag, castVote, appeal, moderationOverview, caseDetail, urgentRemove, voteDeletion, clearDeletionVotes } from "./moderation.js";
 import { challenge, verify as verifyAntibot } from "./antibot.js";
 import { activeCode, getCode, codesList, requestsList, openRequest, voteRequest, closeNow } from "./codes.js";
+import { newReceipt, receiptHash, dayOf } from "./ballot.js";
 import { moderate } from "../public/shared/moderation.js";
 import { sanitizeCst, validateCst, constDiffs, relativeToBase, mergedCst } from "../public/shared/constitution.js";
 import { paras, normText, parseTags, normQ, THEMES, KINDS, PHASE_INDEX } from "../public/shared/util.js";
@@ -36,7 +37,7 @@ function checkContent(...texts) {
 const meView = u => u && {
   id: u.id, pseudo: u.pseudo, email: u.email, minor: !!u.minor, role: u.role, emailVerified: !!u.email_verified,
   suspendedUntil: u.suspended_until > now() ? u.suspended_until : 0,
-  duties: q("SELECT COUNT(*) c FROM case_jurors j JOIN cases c ON c.id=j.case_id WHERE j.user_id=? AND c.status='open' AND j.vote IS NULL").get(u.id).c,
+  duties: q("SELECT COUNT(*) c FROM case_jurors j JOIN cases c ON c.id=j.case_id WHERE j.user_id=? AND c.status='open' AND j.voted_at IS NULL").get(u.id).c,
   unread: q("SELECT COUNT(*) c FROM notifications WHERE user_id=? AND read=0").get(u.id).c
 };
 
@@ -370,7 +371,7 @@ route("GET", "/api/moderation", (req) => moderationOverview(currentUser(req)));
 route("GET", "/api/cases/:id", (req, res, { params }) => caseDetail(currentUser(req), params.id));
 route("POST", "/api/cases/:id/vote", async (req, res, { params }) => {
   const u = requireActive(req), b = await readJson(req);
-  return castVote(u, params.id, String(b.action || ""), b.comment);
+  return castVote(u, params.id, String(b.action || ""), b.comment, b.receipt);
 });
 route("POST", "/api/cases/:id/appeal", (req, res, { params }) => appeal(requireUser(req), params.id));
 route("GET", "/api/notifications", (req) => {
@@ -405,13 +406,27 @@ route("POST", "/api/proposals/:id/parrainage", async (req, res, { params }) => {
 route("POST", "/api/proposals/:id/vote", async (req, res, { params }) => {
   const u = requireActive(req), p = loadForAction(params.id), b = await readJson(req);
   if (p.phase !== "vote") fail(409, "Le vote n'est pas ouvert sur cette proposition.");
-  if (b.choice === null) q("DELETE FROM votes WHERE proposal_id=? AND user_id=?").run(p.id, u.id);
-  else {
-    if (!["p", "c", "a"].includes(b.choice)) fail(400, "Choix de vote inconnu.");
-    q(`INSERT INTO votes(proposal_id,user_id,choice,minor,date) VALUES (?,?,?,?,?)
-       ON CONFLICT(proposal_id,user_id) DO UPDATE SET choice=excluded.choice, date=excluded.date`).run(p.id, u.id, b.choice, u.minor ? 1 : 0, now());
-  }
-  return { ok: true };
+  if (b.choice !== null && !["p", "c", "a"].includes(b.choice)) fail(400, "Choix de vote inconnu.");
+  return tx(() => {
+    const voted = !!q("SELECT 1 x FROM vote_participations WHERE proposal_id=? AND user_id=?").get(p.id, u.id);
+    // Premier vote : une participation au nom de l'inscrit, un bulletin sans nom sous un code neuf.
+    if (!voted) {
+      if (b.choice === null) fail(409, "Tu n'as pas encore voté sur cette proposition.");
+      const receipt = newReceipt();
+      q("INSERT INTO vote_participations(proposal_id,user_id,day) VALUES (?,?,?)").run(p.id, u.id, dayOf(now()));
+      q("INSERT INTO ballots(proposal_id,ballot_id,choice,minor) VALUES (?,?,?,?)").run(p.id, receiptHash(receipt), b.choice, u.minor ? 1 : 0);
+      return { ok: true, receipt };
+    }
+    // Changer d'avis : seul le code retrouve le bulletin.
+    if (!b.receipt) fail(409, "Tu as déjà voté. Pour changer ton vote, saisis le code de vote reçu au moment du vote.");
+    const id = receiptHash(b.receipt);
+    if (!q("SELECT 1 x FROM ballots WHERE proposal_id=? AND ballot_id=?").get(p.id, id)) fail(400, "Ce code ne correspond à aucun bulletin de cette proposition.");
+    if (b.choice === null) {
+      q("DELETE FROM ballots WHERE proposal_id=? AND ballot_id=?").run(p.id, id);
+      q("DELETE FROM vote_participations WHERE proposal_id=? AND user_id=?").run(p.id, u.id);
+    } else q("UPDATE ballots SET choice=? WHERE proposal_id=? AND ballot_id=?").run(b.choice, p.id, id);
+    return { ok: true };
+  });
 });
 
 route("POST", "/api/proposals/:id/advance", (req, res, { params }) => {
@@ -446,7 +461,7 @@ route("POST", "/api/codes/requests", async (req) => {
 });
 route("POST", "/api/codes/requests/:id/vote", async (req, res, { params }) => {
   const u = requireActive(req), b = await readJson(req);
-  return voteRequest(u, params.id, b.choice ?? null);
+  return voteRequest(u, params.id, b.choice ?? null, b.receipt);
 });
 route("POST", "/api/codes/requests/:id/advance", (req, res, { params }) => {
   if (!config.demoMode) fail(403, "Le mode démo n'est pas activé sur ce serveur.");

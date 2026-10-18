@@ -5,6 +5,7 @@ import { fail } from "./http.js";
 import { now, uid, journal, cstNow } from "./model.js";
 import { notify } from "./moderation.js";
 import { normQ, DAY } from "../public/shared/util.js";
+import { newReceipt, receiptHash, dayOf } from "./ballot.js";
 
 /* ---------- schéma ---------- */
 // Tables créées ici, de façon idempotente, pour ne pas dépendre de l'ordre des migrations de db.js.
@@ -32,14 +33,29 @@ db.exec(`
     result TEXT
   );
   CREATE INDEX IF NOT EXISTS code_requests_status ON code_requests(status, ends_at);
-  CREATE TABLE IF NOT EXISTS code_votes(
+  -- Secret du vote, comme pour les propositions : qui a voté (et quel jour) d'un côté, quoi de l'autre.
+  CREATE TABLE IF NOT EXISTS code_participations(
     request_id TEXT NOT NULL REFERENCES code_requests(id) ON DELETE CASCADE,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    choice TEXT NOT NULL,
-    date INTEGER NOT NULL,
+    day INTEGER NOT NULL,
     PRIMARY KEY(request_id, user_id)
   );
+  CREATE TABLE IF NOT EXISTS code_ballots(
+    request_id TEXT NOT NULL REFERENCES code_requests(id) ON DELETE CASCADE,
+    ballot_id TEXT NOT NULL,
+    choice TEXT NOT NULL,
+    PRIMARY KEY(request_id, ballot_id)
+  ) WITHOUT ROWID;
 `);
+// Ancienne table qui reliait chaque choix à un compte : reprise dans un ordre aléatoire, puis effacée du fichier.
+if (db.prepare("SELECT 1 x FROM sqlite_master WHERE type='table' AND name='code_votes'").get()) {
+  db.exec(`BEGIN;
+    INSERT OR IGNORE INTO code_participations(request_id,user_id,day) SELECT request_id, user_id, (date / 86400000) * 86400000 FROM code_votes;
+    INSERT INTO code_ballots(request_id,ballot_id,choice) SELECT request_id, lower(hex(randomblob(32))), choice FROM code_votes ORDER BY random();
+    DROP TABLE code_votes;
+    COMMIT;`);
+  db.exec("VACUUM");
+}
 for (const table of ["proposals", "laws"])
   if (!db.prepare(`PRAGMA table_info(${table})`).all().some(c => c.name === "code_id")) db.exec(`ALTER TABLE ${table} ADD COLUMN code_id TEXT`);
 
@@ -65,8 +81,8 @@ function requestView(r, viewer) {
   const out = {
     id: r.id, action: r.action, name: r.name, description: r.description, reason: r.reason, author, createdAt: r.created_at,
     endsAt: r.ends_at, rules: J(r.rules), status: r.status, code: code && { id: code.id, name: code.name, status: code.status },
-    participation: q("SELECT COUNT(*) c FROM code_votes WHERE request_id=?").get(r.id).c,
-    myVote: viewer ? q("SELECT choice FROM code_votes WHERE request_id=? AND user_id=?").get(r.id, viewer.id)?.choice || null : null,
+    participation: q("SELECT COUNT(*) c FROM code_participations WHERE request_id=?").get(r.id).c,
+    voted: !!viewer && !!q("SELECT 1 x FROM code_participations WHERE request_id=? AND user_id=?").get(r.id, viewer.id),
     isAuthor: viewer?.id === r.author_id
   };
   // Comme pour les lois, les résultats restent cachés jusqu'à la clôture.
@@ -122,17 +138,28 @@ export function openRequest(user, b, checkContent) {
   return { id };
 }
 
-export function voteRequest(user, id, choice) {
+export function voteRequest(user, id, choice, receipt) {
   const r = q("SELECT * FROM code_requests WHERE id=?").get(String(id));
   if (!r) fail(404, "Demande introuvable.");
   if (r.status !== "open" || r.ends_at <= now()) fail(409, "Le vote sur cette demande est clos.");
-  if (choice === null) q("DELETE FROM code_votes WHERE request_id=? AND user_id=?").run(r.id, user.id);
-  else {
-    if (!["p", "c"].includes(choice)) fail(400, "Choix de vote inconnu.");
-    q(`INSERT INTO code_votes(request_id,user_id,choice,date) VALUES (?,?,?,?)
-       ON CONFLICT(request_id,user_id) DO UPDATE SET choice=excluded.choice, date=excluded.date`).run(r.id, user.id, choice, now());
-  }
-  return { ok: true };
+  if (choice !== null && !["p", "c"].includes(choice)) fail(400, "Choix de vote inconnu.");
+  return tx(() => {
+    if (!q("SELECT 1 x FROM code_participations WHERE request_id=? AND user_id=?").get(r.id, user.id)) {
+      if (choice === null) fail(409, "Tu n'as pas encore voté sur cette demande.");
+      const code = newReceipt();
+      q("INSERT INTO code_participations(request_id,user_id,day) VALUES (?,?,?)").run(r.id, user.id, dayOf(now()));
+      q("INSERT INTO code_ballots(request_id,ballot_id,choice) VALUES (?,?,?)").run(r.id, receiptHash(code), choice);
+      return { ok: true, receipt: code };
+    }
+    if (!receipt) fail(409, "Tu as déjà voté. Pour changer ton vote, saisis le code de vote reçu au moment du vote.");
+    const bid = receiptHash(receipt);
+    if (!q("SELECT 1 x FROM code_ballots WHERE request_id=? AND ballot_id=?").get(r.id, bid)) fail(400, "Ce code ne correspond à aucun bulletin de cette demande.");
+    if (choice === null) {
+      q("DELETE FROM code_ballots WHERE request_id=? AND ballot_id=?").run(r.id, bid);
+      q("DELETE FROM code_participations WHERE request_id=? AND user_id=?").run(r.id, user.id);
+    } else q("UPDATE code_ballots SET choice=? WHERE request_id=? AND ballot_id=?").run(choice, r.id, bid);
+    return { ok: true };
+  });
 }
 
 /* ---------- clôture ---------- */
@@ -163,7 +190,7 @@ function apply(r, at) {
 function close(r, at) {
   const rules = J(r.rules), t = { p: 0, c: 0 };
   const what = r.action === "create" ? `créer le code « ${r.name} »` : `${ACTIONS[r.action]} le code « ${getCode(r.code_id)?.name || r.name} »`;
-  for (const v of q("SELECT choice, COUNT(*) c FROM code_votes WHERE request_id=? GROUP BY choice").all(r.id)) t[v.choice] = v.c;
+  for (const v of q("SELECT choice, COUNT(*) c FROM code_ballots WHERE request_id=? GROUP BY choice").all(r.id)) t[v.choice] = v.c;
   const ex = t.p + t.c, pourPct = ex ? Math.round(t.p * 1000 / ex) / 10 : 0;
   const voted = ex >= rules.minVotes && (t.p / ex) * 100 > rules.majorityPct;
   const applied = voted ? apply(r, at) : { ok: false, note: ex < rules.minVotes ? `Pas assez de votes (${ex} sur ${rules.minVotes} minimum).` : "La majorité a voté contre." };
