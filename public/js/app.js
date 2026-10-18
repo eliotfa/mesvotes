@@ -510,7 +510,11 @@ function codeRequestHtml(r) {
     : r.action === "modify" ? `<p style="margin:6px 0 0">Nouveau nom : <b>${esc(r.name)}</b>${r.description ? ` · description : ${esc(r.description)}` : ""}</p>` : "";
   const open = r.status === "open", res = r.result;
   const vote = !open ? "" : !me() ? `<a class="btn small" href="#/connexion" data-act="login-then" style="text-decoration:none">Se connecter pour voter</a>`
-    : `<div class="votebtns row" role="group" aria-label="Ton vote">${[["p", "Pour", "--pour"], ["c", "Contre", "--contre"]].map(([k, l, cv]) => `<button class="vbtn" style="--c:var(${cv})" data-act="code-vote" data-r="${r.id}" data-v="${k}" aria-pressed="${r.myVote === k}" ${needsVerify() ? "disabled" : ""}><span>${l}</span><span class="box">${r.myVote === k ? "✓" : ""}</span></button>`).join("")}</div>`;
+    : UI.receipt?.id === r.id ? receiptBox(UI.receipt)
+    : r.voted ? `<p style="margin:8px 0">✓ Tu as voté. Pour changer ou retirer ton vote, saisis ton code de vote.</p>
+      <form class="stack" data-form="code-revote" data-r="${r.id}">${codeField()}<div class="votebtns row">${[["p", "Pour"], ["c", "Contre"], ["x", "Retirer mon vote"]].map(([k, l]) => `<label class="optrow"><input type="radio" name="choice" value="${k}" required><span>${l}</span></label>`).join("")}</div>
+      <div class="form-msg"></div><button class="btn primary small" type="submit">Changer mon vote</button></form>`
+    : `<div class="votebtns row" role="group" aria-label="Ton vote">${[["p", "Pour", "--pour"], ["c", "Contre", "--contre"]].map(([k, l, cv]) => `<button class="vbtn" style="--c:var(${cv})" data-act="code-vote" data-r="${r.id}" data-v="${k}" ${needsVerify() ? "disabled" : ""}><span>${l}</span><span class="box"></span></button>`).join("")}</div>`;
   return `<div class="queue-item">
     <div class="meta"><span class="pill${r.action === "delete" ? " warn" : ""}">${REQ_LABEL[r.action]}</span><strong style="color:var(--ink)">${target}</strong><span>· demandé par ${userLink(r.author)}</span>
       <span>· ${open ? `clôture le ${fmtD(r.endsAt)} (J-${daysLeft(r.endsAt)}), ${plural(r.participation, "votant")}` : `${r.status === "adopted" ? "adoptée" : "rejetée"} le ${fmtD(res.closedAt)} · ${res.pour} pour, ${res.contre} contre`}</span></div>
@@ -762,7 +766,7 @@ const receiptBox = rc => `<div class="notice ok" role="status"><strong>A voté.<
   <div class="mono" style="font-size:18px;letter-spacing:.04em;margin:8px 0;color:var(--ink);user-select:all">${esc(rc.code)}</div>
   <p style="margin:0 0 10px;font-size:13px">Note-le ou prends-le en photo : c'est le seul moyen de changer ton vote jusqu'à la clôture. Il ne sera plus jamais affiché. Le site sait que tu as voté, pas ce que tu as voté.</p>
   <button class="btn small" data-act="receipt-done">C'est noté</button></div>`;
-const codeField = () => `<label class="f">Code de vote<input id="rv-code" required autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABCDE-FGHJK-MNPQR-STUVW"></label>`;
+const codeField = () => `<label class="f">Code de vote<input name="code" required autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABCDE-FGHJK-MNPQR-STUVW"></label>`;
 
 /* ---------- modération et administration ---------- */
 async function viewMod() {
@@ -1094,8 +1098,8 @@ document.addEventListener("click", async e => {
       return;
     case "code-vote": {
       if (!me()) { UI.after = location.hash; return go("#/connexion"); }
-      const choice = el.getAttribute("aria-pressed") === "true" ? null : el.dataset.v;
-      if (await act(() => api("POST", `/api/codes/requests/${el.dataset.r}/vote`, { choice }), choice ? "Vote enregistré. Tu peux le changer jusqu'à la clôture." : "Vote retiré.")) rerender();
+      const r = await act(() => api("POST", `/api/codes/requests/${el.dataset.r}/vote`, { choice: el.dataset.v }));
+      if (r) { UI.receipt = { id: el.dataset.r, code: r.receipt }; rerender(); }
       return;
     }
     case "code-advance":
@@ -1187,15 +1191,22 @@ document.addEventListener("submit", async e => {
     else if (kind === "jury") {
       const action = f.querySelector("input[name=action]:checked")?.value;
       if (!action) { box.innerHTML = errBox("", "Choisis une mesure."); return; }
-      const r = await api("POST", `/api/cases/${d.id}/vote`, { action, comment: $("#j-comment").value, receipt: $("#rv-code")?.value });
+      const r = await api("POST", `/api/cases/${d.id}/vote`, { action, comment: $("#j-comment").value, receipt: f.querySelector("[name=code]")?.value });
       if (r.receipt) UI.receipt = { id: d.id, code: r.receipt };
       toast(r.closed ? "Vote enregistré. Tous les jurés ont voté : l'affaire est close." : r.receipt ? "Vote enregistré." : "Vote changé.");
       await loadBoot(); await rerender();
     }
+    else if (kind === "code-revote") {
+      const choice = f.querySelector("input[name=choice]:checked")?.value;
+      if (!choice) { box.innerHTML = errBox("", "Choisis ton vote."); return; }
+      await api("POST", `/api/codes/requests/${f.dataset.r}/vote`, { choice: choice === "x" ? null : choice, receipt: f.querySelector("[name=code]").value });
+      toast(choice === "x" ? "Vote retiré." : "Vote changé.");
+      await rerender();
+    }
     else if (kind === "revote") {
       const choice = f.querySelector("input[name=choice]:checked")?.value;
       if (!choice) { box.innerHTML = errBox("", "Choisis ton vote."); return; }
-      await api("POST", `/api/proposals/${d.id}/vote`, { choice: choice === "x" ? null : choice, receipt: $("#rv-code").value });
+      await api("POST", `/api/proposals/${d.id}/vote`, { choice: choice === "x" ? null : choice, receipt: f.querySelector("[name=code]").value });
       toast(choice === "x" ? "Vote retiré." : "Vote changé.");
       await rerender();
     }
@@ -1244,7 +1255,7 @@ document.addEventListener("submit", async e => {
 });
 
 document.addEventListener("keydown", e => { if (e.key === "Escape" && $("#modal-root").innerHTML) closeModal(); });
-window.addEventListener("hashchange", () => { closeModal(); UI.receipt = null; UI.editing = false; UI.editingTags = false; UI.openVer = null; if (!location.hash.startsWith("#/proposer") && !location.hash.startsWith("#/variante")) UI.prefill = null;
+window.addEventListener("hashchange", () => { closeModal(); UI.receipt = null; UI.editing = false; UI.editingTags = false; UI.openVer = null; UI.codeForm = null; if (!location.hash.startsWith("#/proposer") && !location.hash.startsWith("#/variante")) UI.prefill = null;
   // Rafraîchit le compte (notifications, jury, suspension) à chaque changement de page.
   loadBoot().catch(() => {}).finally(() => render()); });
 

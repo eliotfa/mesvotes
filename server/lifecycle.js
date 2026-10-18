@@ -2,6 +2,7 @@
 // Une horloge interne (tick) fait avancer les phases dès que leur échéance est passée.
 import { q, tx, S } from "./db.js";
 import { mergedCst } from "../public/shared/constitution.js";
+import "./codes.js"; // crée les tables des codes avant toute adoption
 import { MINOR_MIN } from "./ballot.js";
 import {
   now, getProposal, saveProposalState, phaseEnd, threshold, electorate, lastVersion, lawFull, cstNow,

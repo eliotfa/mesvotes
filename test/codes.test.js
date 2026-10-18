@@ -62,8 +62,9 @@ test("créer un code passe par un vote des inscrits", async () => {
   const r = ok(await ana.post("/api/codes/requests", { action: "create", name: "Code du travail", description: "Emploi, salaires, conditions de travail.", reason: "Réunir les textes sur le travail." }));
   assert.equal((await bob.post("/api/codes/requests", { action: "create", name: "code du TRAVAIL", reason: "Doublon de nom." })).status, 409, "nom déjà demandé");
   ok(await ana.post(`/api/codes/requests/${r.id}/vote`, { choice: "p" }));
-  ok(await bob.post(`/api/codes/requests/${r.id}/vote`, { choice: "c" }));
-  ok(await bob.post(`/api/codes/requests/${r.id}/vote`, { choice: "p" })); // changement d'avis
+  const { receipt } = ok(await bob.post(`/api/codes/requests/${r.id}/vote`, { choice: "c" }));
+  assert.equal((await bob.post(`/api/codes/requests/${r.id}/vote`, { choice: "p" })).status, 409, "sans code, pas de second vote");
+  ok(await bob.post(`/api/codes/requests/${r.id}/vote`, { choice: "p", receipt })); // changement d'avis avec le code
   let list = ok(await cleo.get("/api/codes"));
   assert.equal(list.items.length, 0, "rien n'existe avant la clôture");
   assert.equal(list.requests.open[0].participation, 2);

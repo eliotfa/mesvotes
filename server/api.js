@@ -17,6 +17,7 @@ import {
 import { settle, forceAdvance } from "./lifecycle.js";
 import { flag, castVote, appeal, moderationOverview, caseDetail, urgentRemove, voteDeletion, clearDeletionVotes } from "./moderation.js";
 import { challenge, verify as verifyAntibot } from "./antibot.js";
+import { activeCode, getCode, codesList, requestsList, openRequest, voteRequest, closeNow } from "./codes.js";
 import { newReceipt, receiptHash, dayOf } from "./ballot.js";
 import { moderate } from "../public/shared/moderation.js";
 import { sanitizeCst, validateCst, constDiffs, relativeToBase, mergedCst } from "../public/shared/constitution.js";
@@ -460,7 +461,7 @@ route("POST", "/api/codes/requests", async (req) => {
 });
 route("POST", "/api/codes/requests/:id/vote", async (req, res, { params }) => {
   const u = requireActive(req), b = await readJson(req);
-  return voteRequest(u, params.id, b.choice ?? null);
+  return voteRequest(u, params.id, b.choice ?? null, b.receipt);
 });
 route("POST", "/api/codes/requests/:id/advance", (req, res, { params }) => {
   if (!config.demoMode) fail(403, "Le mode démo n'est pas activé sur ce serveur.");
