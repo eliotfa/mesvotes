@@ -228,20 +228,56 @@ const MIGRATIONS = [
     date INTEGER NOT NULL,
     PRIMARY KEY(target_type, target_id, user_id)
   );
+  `,
+  // v5 : secret du vote. Le registre de participation (qui, quel jour) est séparé de l'urne (quoi).
+  // L'urne n'a ni compte, ni date, ni rowid : ses lignes sont rangées par empreinte aléatoire.
+  `
+  CREATE TABLE vote_participations(
+    proposal_id TEXT NOT NULL REFERENCES proposals(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    day INTEGER NOT NULL,
+    PRIMARY KEY(proposal_id, user_id)
+  );
+  CREATE TABLE ballots(
+    proposal_id TEXT NOT NULL REFERENCES proposals(id) ON DELETE CASCADE,
+    ballot_id TEXT NOT NULL,
+    choice TEXT NOT NULL,
+    minor INTEGER NOT NULL,
+    PRIMARY KEY(proposal_id, ballot_id)
+  ) WITHOUT ROWID;
+  INSERT INTO vote_participations(proposal_id,user_id,day) SELECT proposal_id, user_id, (date / 86400000) * 86400000 FROM votes;
+  INSERT INTO ballots(proposal_id,ballot_id,choice,minor) SELECT proposal_id, lower(hex(randomblob(32))), choice, minor FROM votes ORDER BY random();
+  DROP TABLE votes;
+  CREATE TABLE case_ballots(
+    case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    ballot_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    comment TEXT,
+    PRIMARY KEY(case_id, ballot_id)
+  ) WITHOUT ROWID;
+  INSERT INTO case_ballots(case_id,ballot_id,action,comment) SELECT case_id, lower(hex(randomblob(32))), vote, comment FROM case_jurors WHERE vote IS NOT NULL ORDER BY random();
+  UPDATE case_jurors SET voted_at = (voted_at / 86400000) * 86400000 WHERE voted_at IS NOT NULL;
+  ALTER TABLE case_jurors DROP COLUMN vote;
+  ALTER TABLE case_jurors DROP COLUMN comment;
   `
 ];
+// À partir de cette version, les anciens liens compte → choix doivent aussi disparaître du fichier.
+const SECRET_BALLOT_VERSION = 5;
 
 export function openDb(file) {
   const target = file || path.join(config.dataDir, "mesvotes.db");
   if (target !== ":memory:") fs.mkdirSync(path.dirname(target), { recursive: true });
   const db = new DatabaseSync(target);
-  db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
+  // secure_delete : un vote modifié ou retiré est effacé du fichier, pas seulement marqué libre.
+  db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA secure_delete = ON;");
   const version = db.prepare("PRAGMA user_version").get().user_version;
   for (let v = version; v < MIGRATIONS.length; v++) {
     db.exec("BEGIN");
     try { db.exec(MIGRATIONS[v]); db.exec(`PRAGMA user_version = ${v + 1}`); db.exec("COMMIT"); }
     catch (e) { db.exec("ROLLBACK"); throw e; }
   }
+  // Réécrit le fichier pour qu'il ne reste aucune trace de l'ancienne table des votes (pages libres, WAL).
+  if (version < SECRET_BALLOT_VERSION && MIGRATIONS.length >= SECRET_BALLOT_VERSION) { db.exec("VACUUM"); db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); }
   return db;
 }
 

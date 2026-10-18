@@ -2,6 +2,7 @@
 // Une horloge interne (tick) fait avancer les phases dès que leur échéance est passée.
 import { q, tx, S } from "./db.js";
 import { mergedCst } from "../public/shared/constitution.js";
+import { MINOR_MIN } from "./ballot.js";
 import {
   now, getProposal, saveProposalState, phaseEnd, threshold, electorate, lastVersion, lawFull, cstNow,
   needMaj, needQuo, uid
@@ -12,8 +13,11 @@ const fr = v => String(v).replace(".", ",");
 
 function tallies(id) {
   const t = { maj: { p: 0, c: 0, a: 0 }, min: { p: 0, c: 0, a: 0 } };
-  for (const r of q("SELECT choice, minor, COUNT(*) c FROM votes WHERE proposal_id=? GROUP BY choice, minor").all(id))
+  for (const r of q("SELECT choice, minor, COUNT(*) c FROM ballots WHERE proposal_id=? GROUP BY choice, minor").all(id))
     t[r.minor ? "min" : "maj"][r.choice] = r.c;
+  // Trop peu de mineurs : leur décompte à part dévoilerait leurs choix. On le fond dans le total.
+  const nMin = t.min.p + t.min.c + t.min.a;
+  if (nMin > 0 && nMin < MINOR_MIN) return { maj: { p: t.maj.p + t.min.p, c: t.maj.c + t.min.c, a: t.maj.a + t.min.a }, min: null, minorsMerged: true };
   return t;
 }
 
@@ -45,7 +49,8 @@ function applyAdopted(p, result, at) {
 
 function closeVote(p, at) {
   const votes = tallies(p.id), el = electorate();
-  const pour = votes.maj.p + votes.min.p, contre = votes.maj.c + votes.min.c, abst = votes.maj.a + votes.min.a;
+  const m = votes.min || { p: 0, c: 0, a: 0 };
+  const pour = votes.maj.p + m.p, contre = votes.maj.c + m.c, abst = votes.maj.a + m.a;
   const all = pour + contre + abst, ex = pour + contre;
   const pourPct = pct(pour, ex), participationPct = pct(all, el);
   const ok = ex > 0 && (pour / ex) * 100 > needMaj(p) && (all / el) * 100 >= needQuo(p);

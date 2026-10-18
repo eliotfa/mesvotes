@@ -8,6 +8,7 @@ import { sendMail } from "./mail.js";
 import { renderMail } from "./mail-template.js";
 import { now, uid, cstNow, journal, isAdmin, lastVersion, deletionState } from "./model.js";
 import { MOD_ACTIONS, actionsFor, REPORT_REASONS } from "../public/shared/constitution.js";
+import { newReceipt, receiptHash, dayOf } from "./ballot.js";
 
 const HOUR = 3600e3, DAY = 864e5, APPEAL_DAYS = 7;
 const SEV = Object.fromEntries(MOD_ACTIONS.map(a => [a.id, a.sev]));
@@ -137,17 +138,28 @@ function drawJurors(caseId, count, exclude) {
 }
 
 /* ---------- vote du jury ---------- */
-export function castVote(user, caseId, action, comment) {
+export function castVote(user, caseId, action, comment, receipt) {
   return tx(() => {
     const c = q("SELECT * FROM cases WHERE id=?").get(String(caseId)); if (!c) fail(404, "Affaire introuvable.");
     if (c.status !== "open") fail(409, "Cette affaire est close.");
     const j = q("SELECT * FROM case_jurors WHERE case_id=? AND user_id=?").get(c.id, user.id);
     if (!j) fail(403, "Seuls les jurés tirés au sort votent sur cette affaire.");
     if (!actionsFor(c.target_type).some(a => a.id === action)) fail(400, "Mesure inconnue.");
-    q("UPDATE case_jurors SET vote=?, comment=?, voted_at=? WHERE case_id=? AND user_id=?").run(action, String(comment || "").trim().slice(0, 500) || null, now(), c.id, user.id);
-    const left = q("SELECT COUNT(*) c FROM case_jurors WHERE case_id=? AND vote IS NULL").get(c.id).c;
+    const text = String(comment || "").trim().slice(0, 500) || null;
+    let code;
+    // Comme pour les propositions : le juré est noté « a voté », sa mesure part dans l'urne sous un code.
+    if (j.voted_at == null) {
+      code = newReceipt();
+      q("UPDATE case_jurors SET voted_at=? WHERE case_id=? AND user_id=?").run(dayOf(now()), c.id, user.id);
+      q("INSERT INTO case_ballots(case_id,ballot_id,action,comment) VALUES (?,?,?,?)").run(c.id, receiptHash(code), action, text);
+    } else {
+      if (!receipt) fail(409, "Tu as déjà voté. Pour changer ton vote, saisis le code de vote reçu au moment du vote.");
+      const r = q("UPDATE case_ballots SET action=?, comment=? WHERE case_id=? AND ballot_id=?").run(action, text, c.id, receiptHash(receipt));
+      if (!r.changes) fail(400, "Ce code ne correspond à aucun bulletin de cette affaire.");
+    }
+    const left = q("SELECT COUNT(*) c FROM case_jurors WHERE case_id=? AND voted_at IS NULL").get(c.id).c;
     if (!left) closeCase(c.id, now());
-    return { closed: !left };
+    return code ? { closed: !left, receipt: code } : { closed: !left };
   });
 }
 
@@ -161,7 +173,7 @@ function closeCase(caseId, at) {
   const c = q("SELECT * FROM cases WHERE id=?").get(caseId);
   if (!c || c.status !== "open") return;
   const jurors = q("SELECT * FROM case_jurors WHERE case_id=?").all(c.id);
-  const votes = jurors.filter(j => j.vote).map(j => j.vote);
+  const votes = q("SELECT action FROM case_ballots WHERE case_id=?").all(c.id).map(b => b.action);
   const quorum = Math.max(1, Math.ceil(jurors.length / 2));
   if (votes.length < quorum && !c.extended && at >= c.deadline) {
     // Une seule prolongation : on tire au sort des remplaçants pour les absents.
@@ -305,7 +317,7 @@ const publicCase = c => ({
   id: c.id, short: short(c.id), targetType: c.target_type, round: c.round, appealOf: c.appeal_of, status: c.status,
   openedAt: c.opened_at, deadline: c.deadline, closedAt: c.closed_at, decision: c.decision, tally: J(c.tally), note: c.note,
   jurySize: q("SELECT COUNT(*) c FROM case_jurors WHERE case_id=?").get(c.id).c,
-  votes: q("SELECT COUNT(*) c FROM case_jurors WHERE case_id=? AND vote IS NOT NULL").get(c.id).c,
+  votes: q("SELECT COUNT(*) c FROM case_jurors WHERE case_id=? AND voted_at IS NOT NULL").get(c.id).c,
   reasons: reasonSummary(c.appeal_of || c.id)
 });
 
@@ -315,7 +327,7 @@ export function moderationOverview(viewer) {
   const out = { closed, openCount, rules: cstNow().params, masked: maskedList(viewer) };
   if (viewer) {
     out.duties = q(`SELECT c.* FROM case_jurors j JOIN cases c ON c.id=j.case_id WHERE j.user_id=? AND c.status='open' ORDER BY c.deadline`).all(viewer.id)
-      .map(c => ({ ...publicCase(c), myVote: q("SELECT vote FROM case_jurors WHERE case_id=? AND user_id=?").get(c.id, viewer.id).vote }));
+      .map(c => ({ ...publicCase(c), voted: q("SELECT voted_at FROM case_jurors WHERE case_id=? AND user_id=?").get(c.id, viewer.id).voted_at != null }));
     out.mine = q("SELECT * FROM cases WHERE target_user=? ORDER BY opened_at DESC LIMIT 20").all(viewer.id).map(publicCase);
   }
   if (isAdmin(viewer) || viewer?.role === "moderator") out.open = q("SELECT * FROM cases WHERE status='open' ORDER BY deadline").all().map(c => ({ ...publicCase(c), snapshot: J(c.snapshot), targetId: c.target_id }));
@@ -334,8 +346,9 @@ export function caseDetail(viewer, caseId) {
   }
   base.snapshot = J(c.snapshot);
   if (juror || staff) base.comments = q("SELECT reason, comment FROM flags WHERE case_id=? AND comment IS NOT NULL").all(c.appeal_of || c.id);
-  if (juror) base.myVote = juror.vote, base.myComment = juror.comment;
-  if (c.status === "closed" && (juror || staff)) base.juryComments = q("SELECT vote, comment FROM case_jurors WHERE case_id=? AND comment IS NOT NULL").all(c.id);
+  if (juror) base.voted = juror.voted_at != null;
+  // Rangées par empreinte (aléatoire) : ni nom, ni date, ni ordre de vote.
+  if (c.status === "closed" && (juror || staff)) base.juryComments = q("SELECT action AS vote, comment FROM case_ballots WHERE case_id=? AND comment IS NOT NULL ORDER BY ballot_id").all(c.id);
   if (c.appeal_of) { const first = q("SELECT decision, tally FROM cases WHERE id=?").get(c.appeal_of); base.firstDecision = first.decision; base.firstTally = J(first.tally); }
   if (isTarget) base.canAppeal = c.status === "closed" && c.round === 1 && SEV[c.decision] > 0 && !c.appealed && now() - c.closed_at <= APPEAL_DAYS * DAY;
   if (isTarget) base.appealCase = q("SELECT id FROM cases WHERE appeal_of=?").get(c.id)?.id || null;

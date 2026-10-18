@@ -112,17 +112,23 @@ test("une loi suit tout le parcours jusqu'au recueil", async () => {
   assert.equal((await ana.post(`/api/proposals/${loiId}/versions`, { text: "Nouveau texte assez long.", note: "essai" })).status, 409);
   jump(91);
   ok(await ana.post(`/api/proposals/${loiId}/vote`, { choice: "p" }));
-  ok(await bob.post(`/api/proposals/${loiId}/vote`, { choice: "c" }));
-  ok(await bob.post(`/api/proposals/${loiId}/vote`, { choice: "p" })); // changement d'avis
+  const { receipt } = ok(await bob.post(`/api/proposals/${loiId}/vote`, { choice: "c" }));
+  assert.match(receipt, /^[A-Z2-9]{5}(-[A-Z2-9]{5}){3}$/, "un code de vote est remis une seule fois");
+  assert.equal((await bob.post(`/api/proposals/${loiId}/vote`, { choice: "p" })).status, 409, "sans code, pas de second vote");
+  assert.equal((await bob.post(`/api/proposals/${loiId}/vote`, { choice: "p", receipt: "AAAAA-AAAAA-AAAAA-AAAAA" })).status, 400, "un code inconnu est refusé");
+  ok(await bob.post(`/api/proposals/${loiId}/vote`, { choice: "p", receipt: receipt.toLowerCase().replace(/-/g, " ") })); // changement d'avis
   ok(await cleo.post(`/api/proposals/${loiId}/vote`, { choice: "c" }));
   d = ok(await cleo.get(`/api/proposals/${loiId}`));
   assert.equal(d.result, null, "les résultats restent cachés pendant le vote");
   assert.equal(d.participation, 3);
+  assert.equal(d.voted, true);
+  assert.equal(d.myVote, undefined, "le serveur ne peut plus dire ce que l'inscrit a voté");
   jump(8);
   d = ok(await cleo.get(`/api/proposals/${loiId}`));
   assert.equal(d.phase, "fin");
   assert.equal(d.result.outcome, "adopted");
-  assert.deepEqual(d.result.votes, { maj: { p: 1, c: 1, a: 0 }, min: { p: 1, c: 0, a: 0 } });
+  // Un seul mineur a voté : publier son décompte à part dévoilerait son choix.
+  assert.deepEqual(d.result.votes, { maj: { p: 2, c: 1, a: 0 }, min: null, minorsMerged: true });
   lawId = d.lawId;
   const law = ok(await cleo.get(`/api/laws/${lawId}`));
   assert.equal(law.versions.length, 1);
@@ -212,7 +218,13 @@ test("modération citoyenne : jury tiré au sort, mesure médiane, suspension, a
   assert.equal(d.comments[0].comment, "Attaque personnelle");
   // Votes : la médiane (4e sur 7, par ordre de sévérité) est « suspendre 7 jours »
   const votes = ["keep", "hide", "warn", "suspend7", "suspend7", "suspend7", "ban"];
-  for (let i = 0; i < 7; i++) ok(await drawn[i].post(`/api/cases/${caseId}/vote`, { action: votes[i] }));
+  const { receipt } = ok(await drawn[0].post(`/api/cases/${caseId}/vote`, { action: "ban", comment: "Trop sévère ?" }));
+  assert.equal((await drawn[0].post(`/api/cases/${caseId}/vote`, { action: "keep" })).status, 409, "sans code, le juré ne revote pas");
+  ok(await drawn[0].post(`/api/cases/${caseId}/vote`, { action: votes[0], receipt })); // le juré change d'avis avec son code
+  const mine = ok(await drawn[0].get(`/api/cases/${caseId}`));
+  assert.equal(mine.voted, true);
+  assert.equal(mine.myVote, undefined, "le serveur ne peut plus dire ce que le juré a voté");
+  for (let i = 1; i < 7; i++) ok(await drawn[i].post(`/api/cases/${caseId}/vote`, { action: votes[i] }));
   const closed = ok(await bob.get(`/api/cases/${caseId}`));
   assert.equal(closed.status, "closed");
   assert.equal(closed.decision, "suspend7");
@@ -359,4 +371,20 @@ test("fichiers joints : un contenu qui ne correspond pas à l'extension est refu
   const r = await ana.call("POST", "/api/uploads", undefined, { raw: Buffer.from("MZ\x90\x00 programme"), headers: { "x-file-name": encodeURIComponent("rapport.pdf") } });
   assert.equal(r.status, 400);
   assert.match(r.data.error, /ne correspond pas/);
+});
+
+test("secret du vote : aucune table ne relie un compte à un choix", async () => {
+  const { db } = await import("../server/db.js");
+  const tables = db.prepare("SELECT name, sql FROM sqlite_master WHERE type='table'").all();
+  for (const t of tables) {
+    const cols = db.prepare(`PRAGMA table_info(${t.name})`).all().map(c => c.name);
+    const who = cols.some(c => c === "user_id"), what = cols.some(c => ["choice", "vote", "action"].includes(c));
+    assert.ok(!(who && what), `la table ${t.name} relie un compte à un choix`);
+    if (["ballots", "case_ballots"].includes(t.name)) {
+      assert.ok(!cols.some(c => /date|_at$|day/.test(c)), `l'urne ${t.name} ne doit porter aucune date`);
+      assert.match(t.sql, /WITHOUT ROWID/, `l'urne ${t.name} ne doit pas garder l'ordre d'arrivée`);
+    }
+  }
+  assert.equal(db.prepare("PRAGMA secure_delete").get().secure_delete, 1);
+  assert.ok(db.prepare("SELECT COUNT(*) c FROM ballots").get().c > 0, "les bulletins existent bien");
 });

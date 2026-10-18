@@ -3,6 +3,7 @@
 import { q, tx, S } from "./db.js";
 import { now, uid, cstNow, journal } from "./model.js";
 import { DAY } from "../public/shared/util.js";
+import { newReceipt, receiptHash, dayOf } from "./ballot.js";
 
 const PEOPLE = [["citoyenne_ana", 0], ["Karim.B", 0], ["Sandrine_R", 0], ["juju_lgr", 0], ["Pierre_77", 0], ["Lea.T", 1], ["theo_m", 1], ["Mehdi.asso", 0], ["Nadia.com", 0], ["anonyme_42", 0]];
 
@@ -48,7 +49,10 @@ function seed() {
         q("INSERT INTO flags(target_type,target_id,user_id,reason,comment,date,case_id) VALUES ('note',?,?,'insulte',NULL,?,NULL)").run(nid, crowd[60 + i].id, ago(n.days - 1));
     });
     (o.parrains ? crowd.slice(0, o.parrains) : []).forEach(c => q("INSERT INTO parrainages(proposal_id,user_id,date) VALUES (?,?,?)").run(id, c.id, ago(1)));
-    (o.votes || []).forEach((choice, i) => q("INSERT INTO votes(proposal_id,user_id,choice,minor,date) VALUES (?,?,?,?,?)").run(id, crowd[i].id, choice, crowd[i].minor ? 1 : 0, ago(1)));
+    (o.votes || []).forEach((choice, i) => {
+      q("INSERT INTO vote_participations(proposal_id,user_id,day) VALUES (?,?,?)").run(id, crowd[i].id, dayOf(ago(1)));
+      q("INSERT INTO ballots(proposal_id,ballot_id,choice,minor) VALUES (?,?,?,?)").run(id, receiptHash(newReceipt()), choice, crowd[i].minor ? 1 : 0);
+    });
     return id;
   };
 
