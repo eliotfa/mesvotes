@@ -643,7 +643,7 @@ function newHtml() {
   const themesSel = pf.themes || (law ? law.themes : []);
   const codeSel = pf.codeId !== undefined ? pf.codeId : law ? law.codeId : null;
   return head + `
-  <form class="stack" data-form="new" style="max-width:800px">
+  <form class="stack" data-form="new" style="max-width:100%">
     ${pf.forkOf ? `<div class="notice">Variante de « ${esc(pf.forkTitle || "")} ». Un lien vers l'original sera affiché des deux côtés.</div>` : ""}
     <label class="f">Titre <small>Une phrase claire qui dit ce qui change.</small><input type="text" id="p-title" required minlength="5" maxlength="120" value="${esc(dflTitle)}" placeholder="Ex. : Rendre le permis de conduire gratuit pour les 17-25 ans"></label>
     <label class="f">Résumé <small>280 caractères max. C'est ce qu'on lit en premier.</small><textarea id="p-summary" required minlength="10" maxlength="280" rows="2">${esc(pf.summary || "")}</textarea></label>
