@@ -4,6 +4,8 @@ import { diffView } from "../shared/diff.js";
 import { PARAMS, PMETA, FREE_KEYS, constArticles, constDiffs, paramChanges, n_, fmtParam, sanitizeCst, validateCst, MOD_ACTIONS, actionsFor, REPORT_REASONS } from "../shared/constitution.js";
 import { moderate } from "../shared/moderation.js";
 import { solveAntibot } from "./pow.js";
+import { blockHtml, plainText } from "../shared/richtext.js";
+import { richField, initEditors } from "./editor.js";
 
 const PH = Object.fromEntries(PHASES.map((p, i) => [p.id, { ...p, i }]));
 const $ = s => document.querySelector(s);
@@ -64,7 +66,7 @@ function toast(msg) {
 }
 const phaseChip = p => `<span class="phase" style="--c:${cvar(PH[p.phase].c)};color:var(--c)">${PH[p.phase].name}</span>`;
 const kindChip = k => `<span class="kind ${k}">${KINDS[k].label}</span>`;
-const numbered = (t, struck) => `<div class="text${struck ? " struck" : ""}">${paras(t).map((x, i) => `<div class="para"><span class="num">§${i + 1}</span><p>${esc(x)}</p></div>`).join("")}</div>`;
+const numbered = (t, struck) => `<div class="text${struck ? " struck" : ""}">${paras(t).map((x, i) => `<div class="para"><span class="num">§${i + 1}</span><div class="ptext">${blockHtml(x)}</div></div>`).join("")}</div>`;
 const diffStat = d => `<span class="diffstat"><span class="a">+${d.add}</span><span class="r">−${d.rem}</span><span class="muted">mots</span></span>`;
 const paramTable = ch => `<div class="tablewrap"><table class="ptable"><thead><tr><th>Règle</th><th>Avant</th><th>Après</th></tr></thead><tbody>${ch.map(c => `<tr><td>${esc(PMETA[c.k].l)}</td><td class="v old">${fmtParam(c.k, c.from)}</td><td class="v new">${fmtParam(c.k, c.to)}</td></tr>`).join("")}</tbody></table></div>`;
 const artDiffs = list => list.map(x => `<div class="art-diff" style="margin-top:12px"><h4>${esc(x.title)}</h4><div class="diff">${x.d.html}</div></div>`).join("");
@@ -299,9 +301,9 @@ function editForm(d) {
     <div class="form-msg"></div>
     <div class="btnrow"><button class="btn primary" type="submit">Publier la version ${d.versions.length + 1}</button><button class="btn ghost" type="button" data-act="cancel-edit">Annuler</button></div>`;
   if (d.kind === "const") return `<form class="stack" data-form="edit">${cstEditor(cstNow(), d.merged, "e")}
-    <label class="f">Exposé des motifs<textarea id="edit-text" rows="5" required>${esc(curV(d).text)}</textarea></label>${tail}</form>`;
+    ${richField("edit-text", "Exposé des motifs", "", curV(d).text)}${tail}</form>`;
   return `<form class="stack" data-form="edit">
-    <label class="f">${d.kind === "abrog" ? "Exposé des motifs" : "Texte"} <small>Un paragraphe par bloc, séparés par une ligne vide.</small><textarea id="edit-text" rows="10" required>${esc(curV(d).text)}</textarea></label>${tail}</form>`;
+    ${richField("edit-text", d.kind === "abrog" ? "Exposé des motifs" : "Texte", "Entrée : nouveau paragraphe numéroté (§1, §2…). Maj+Entrée : simple retour à la ligne.", curV(d).text)}${tail}</form>`;
 }
 function textSections(d) {
   const editing = UI.editing && d.isAuthor && d.phase === "projet", canEdit = d.phase === "projet" && d.isAuthor && !editing;
@@ -461,7 +463,7 @@ function lawCards() {
   return L.map(l => { const lv = l.versions[l.versions.length - 1];
     return `<a class="card" href="#/loi/${l.id}" style="color:inherit;text-decoration:none">
       <span class="chips"><span class="status-chip ${l.status === "vigueur" ? "" : "off"}">${l.status === "vigueur" ? "En vigueur" : "Abrogée"}</span>${l.themes.map(t => `<span class="tag theme">${esc(t)}</span>`).join("")}${l.tags.map(t => `<span class="tag">#${esc(t)}</span>`).join("")}</span>
-      <span class="ttl">${esc(l.title)}</span><span class="sum">${esc(paras(lv.text)[0] || "")}</span>
+      <span class="ttl">${esc(l.title)}</span><span class="sum">${esc(plainText(paras(lv.text)[0] || ""))}</span>
       <span class="card-foot"><span>Version ${l.versions.length} · ${fmtD(lv.date)}</span><span class="mono">${l.pending ? `${plural(l.pending, "proposition")} en cours` : ""}</span></span></a>`; }).join("")
     || `<div class="empty">${VIEW.data.items.length ? "Aucune loi ne correspond." : "Aucune loi adoptée pour l'instant. La première viendra d'une proposition votée."}</div>`;
 }
@@ -544,20 +546,20 @@ function newHtml() {
     ${needsVerify() ? `<div class="notice warn">Confirme d'abord ton adresse e-mail pour pouvoir déposer.</div>` : ""}${kindTiles()}`;
   const lawText = l => l.versions[l.versions.length - 1].text;
   let specific = "";
-  if (k === "loi") specific = `<label class="f">Texte de la proposition <small>Écris-la comme un article de loi : un paragraphe par idée, séparés par une ligne vide. Chaque paragraphe sera numéroté (§1, §2…) pour les amendements.</small><textarea id="p-text" required rows="9">${esc(pf.text || "")}</textarea></label>`;
+  if (k === "loi") specific = `${richField("p-text", "Texte de la proposition", "Écris-la comme un article de loi : un paragraphe par idée. Chaque paragraphe sera numéroté (§1, §2…) pour les amendements. Entrée crée un nouveau paragraphe, Maj+Entrée un simple retour à la ligne.", pf.text || "")}`;
   if (k === "modif" || k === "abrog") {
     if (!law) return head + `<div class="empty">Aucune loi en vigueur pour l'instant. Une loi naît d'une proposition « Nouvelle loi » adoptée par vote.</div>`;
     specific = `<label class="f">Loi visée<select id="p-law">${lawsV.map(l => `<option value="${l.id}" ${l.id === law.id ? "selected" : ""}>${esc(l.title)} (v${l.versions.length})</option>`).join("")}</select></label>`;
     if (k === "modif") {
       const start = pf.text && pf.lawId === law.id ? pf.text : lawText(law);
-      specific += `<label class="f">Nouveau texte de la loi <small>Pré-rempli avec la version en vigueur : modifie-le directement. Les différences s'affichent en dessous.</small><textarea id="p-text" required rows="10">${esc(start)}</textarea></label>
+      specific += `${richField("p-text", "Nouveau texte de la loi", "Pré-rempli avec la version en vigueur : modifie-le directement. Les différences s'affichent en dessous.", start)}
         <div class="fieldset"><div class="lg">Aperçu des changements</div><div class="diff" id="p-diff">${diffView(lawText(law), start).html}</div></div>`;
     } else specific += `<div class="fieldset"><div class="lg">Texte qui serait supprimé</div>${numbered(lawText(law), true)}</div>
-      <label class="f">Exposé des motifs <small>Pourquoi cette loi doit disparaître.</small><textarea id="p-text" required rows="6">${esc(pf.text || "")}</textarea></label>`;
+      ${richField("p-text", "Exposé des motifs", "Pourquoi cette loi doit disparaître.", pf.text || "")}`;
   }
   if (k === "const") {
     const target = pf.cst ? clone(pf.cst) : clone({ params: cstNow().params, free: cstNow().free });
-    specific = cstEditor(cstNow(), target, "c") + `<label class="f">Exposé des motifs <small>Pourquoi changer ces règles.</small><textarea id="p-text" required rows="5">${esc(pf.text || "")}</textarea></label>`;
+    specific = cstEditor(cstNow(), target, "c") + `${richField("p-text", "Exposé des motifs", "Pourquoi changer ces règles.", pf.text || "")}`;
   }
   const dflTitle = pf.title || (k === "modif" && law ? `Modifier : ${law.title}` : k === "abrog" && law ? `Abroger : ${law.title}` : "");
   const themesSel = pf.themes || (law ? law.themes : []);
@@ -1118,6 +1120,8 @@ document.addEventListener("keydown", e => { if (e.key === "Escape" && $("#modal-
 window.addEventListener("hashchange", () => { closeModal(); UI.editing = false; UI.editingTags = false; UI.openVer = null; if (!location.hash.startsWith("#/proposer") && !location.hash.startsWith("#/variante")) UI.prefill = null;
   // Rafraîchit le compte (notifications, jury, suspension) à chaque changement de page.
   loadBoot().catch(() => {}).finally(() => render()); });
+
+initEditors();
 
 (async () => {
   try { await loadBoot(); }
